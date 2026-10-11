@@ -348,6 +348,11 @@ jobs:
           print('Adapted KSU Next to SUSFS 2.0.0 hook ABI and lifecycle')
           PY
 
+      - name: Instrument and validate KSU root authorization (read-only)
+        run: |
+          set -euo pipefail
+          python3 "$GITHUB_WORKSPACE/scripts/instrument_ksu_root.py" "$CONFIG"
+
       - name: Configure KernelSU
         run: |
           cd "$CONFIG"
