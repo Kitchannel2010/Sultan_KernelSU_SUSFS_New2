@@ -405,7 +405,10 @@ jobs:
           p = root/'fs/exec.c'
           replace(p, 'extern bool ksu_execveat_hook __read_mostly;', 'extern struct static_key_true is_first_zygote;\nextern struct static_key_true ksu_su_compat_enabled;')
           replace(p, 'extern bool susfs_is_boot_completed_triggered __read_mostly;', 'extern bool ksu_boot_completed;')
-          # Keep intercepting /system/bin/su after first zygote and boot-completed.\n          # Original bridge stopped calling ksu_handle_execveat() after boot.\n          # Manager ioctl root still worked, while third-party su commands failed.\n          replace(p, 'ksu_execveat_hook || !susfs_is_boot_completed_triggered',\n                  'static_branch_unlikely(&is_first_zygote) || !ksu_boot_completed || static_branch_unlikely(&ksu_su_compat_enabled)')
+          # Keep sucompat interception enabled after boot.
+          replace(p, 'ksu_execveat_hook || !susfs_is_boot_completed_triggered',
+                  'static_branch_unlikely(&is_first_zygote) || !ksu_boot_completed || static_branch_unlikely(&ksu_su_compat_enabled)')
+          assert 'ksu_execveat_hook || !susfs_is_boot_completed_triggered' not in (root/'fs/exec.c').read_text()
           p = root/'fs/namespace.c'
           s = p.read_text()
           assert 'susfs_is_boot_completed_triggered' in s
