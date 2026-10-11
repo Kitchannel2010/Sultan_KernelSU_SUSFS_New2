@@ -116,6 +116,41 @@ jobs:
           if grep -Eq 'susfs_set_current_proc_(no_su|umounted_for_zygote_next)' "$hook"; then exit 1; fi
           grep -n 'susfs_set_current_proc_umounted();' "$hook"
 
+          # Preserve the old SUSFS 2.0.0 userspace command and kernel API.
+          # Do NOT alias the newer non-su-only command to the all-process variant.
+          dispatch="$CONFIG/KernelSU-Next/kernel/supercall/dispatch.c"
+          python3 - "$dispatch" <<'PY'
+          from pathlib import Path
+          import sys
+          p = Path(sys.argv[1])
+          src = p.read_text()
+          changes = [
+              (
+                  '             susfs_start_sdcard_monitor_fn();',
+                  ''
+              ),
+              (
+                  '        if (susfs_is_current_proc_no_su()) {\n'
+                  '            ret = 0; // SYSCALL_TRACEPOINT is NOT flagged\n'
+                  '        } else {\n'
+                  '            ret = 1; // SYSCALL_TRACEPOINT is flagged\n'
+                  '        }',
+                  '        ret = 1; // SUSFS v2.0.0 does not provide per-process no_su flags'
+              ),
+              (
+                  '        case CMD_SUSFS_HIDE_SUS_MNTS_FOR_NON_SU_PROCS:\n'
+                  '            susfs_set_hide_sus_mnts_for_non_su_procs(arg);',
+                  '        case CMD_SUSFS_HIDE_SUS_MNTS_FOR_ALL_PROCS:\n'
+                  '            susfs_set_hide_sus_mnts_for_all_procs(arg);'
+              ),
+          ]
+          for old, new in changes:
+              if src.count(old) != 1:
+                  raise SystemExit(f'Expected exactly one match for: {old!r}; found {src.count(old)}')
+              src = src.replace(old, new)
+          p.write_text(src)
+          PY
+
       - name: Apply SUSFS Patches
         run: |
           echo "Changing to configuration directory: $CONFIG..."
