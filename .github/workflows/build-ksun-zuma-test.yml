@@ -294,6 +294,34 @@ jobs:
           assert (k/'selinux/selinux.c').read_text().count('    susfs_set_batch_sid();') == 1
           assert 'susfs_is_sid_equal(current_cred(), susfs_zygote_sid)' in (k/'hook/setuid_hook.c').read_text()
 
+          # The package observer triggers a full Manager scan only when
+          # packages.list changes AFTER the watcher has been registered.
+          # On existing installations this is not guaranteed, while
+          # on_boot_completed previously requested prune_only=True (no scan).
+          # Run the normal signature-verifying scanner at both lifecycle points;
+          # no manager UID or root permission is set directly by this bridge.
+          replace(k/'runtime/boot_event.c',
+                  '''    ksu_observer_init();
+              // Sanity check for safe mode only needs early-boot input samples.''',
+                  '''    ksu_observer_init();
+              // An already-installed manager may not trigger a later packages.list event.
+              track_throne(false);
+              // Sanity check for safe mode only needs early-boot input samples.''')
+          replace(k/'runtime/boot_event.c',
+                  '''    track_throne(true);
+              ksu_selinux_hide_drop_backup_if_unused();''',
+                  '''    // Rescan at boot-completed in case packages.list was not ready earlier.
+              // track_throne(false) also prunes stale allowlist entries.
+              track_throne(false);
+              ksu_selinux_hide_drop_backup_if_unused();''')
+          event = (k/'runtime/boot_event.c').read_text()
+          assert event.count('track_throne(false);') == 2
+          assert 'track_throne(true);' not in event
+          assert 'ksu_observer_init();' in event
+          # Keep all authorization and signature checks in place.
+          assert 'is_manager_apk(candidate_path)' in (k/'manager/throne_tracker.c').read_text()
+          assert 'allowed_for_su' in (k/'supercall/dispatch.c').read_text()
+
           # Restore the old devpts handler (with current allowlist checking).
           replace(k/'feature/sucompat.c', '#define SU_PATH', '''#ifdef CONFIG_KSU_SUSFS
           int ksu_handle_devpts(struct inode *inode)
