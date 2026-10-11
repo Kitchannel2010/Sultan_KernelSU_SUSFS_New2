@@ -1,4 +1,4 @@
-name: Experimental Sultan zuma updated KSU Next
+name: Experimental Sultan zuma KSU baseline hooks
 
 on:
   workflow_dispatch:
@@ -302,56 +302,8 @@ jobs:
           assert '#include <linux/security.h>' in selinux_src
           assert 'error = ksu_security_secctx_to_secid(domain, strlen(domain), &sid);' in selinux_src
 
-          # SUSFS v2.0.0 requires Zygote/zygote_next SIDs for setresuid()
-          # to install the Manager driver FD and disable app seccomp.
-          # This KSUN source defines susfs_set_batch_sid() but never invokes it;
-          # normal cache_sid() only populates the separate cached_*_sid fields.
-          # Call it after the policy has loaded, at the existing cache_sid() sites.
-          replace(k/'selinux/selinux.c', '''    }
-          }
-
-          /*
-           * Fast path: compare task's SID directly against cached value.''', '''    }
-          #ifdef CONFIG_KSU_SUSFS
-              // The SUSFS setresuid hook checks susfs_zygote_sid, not cached_zygote_sid.
-              // Without this call those SIDs stay zero and Manager root cannot start.
-              susfs_set_batch_sid();
-          #endif
-          }
-
-          /*
-           * Fast path: compare task's SID directly against cached value.''')
-          assert (k/'selinux/selinux.c').read_text().count('    susfs_set_batch_sid();') == 1
-          assert 'susfs_is_sid_equal(current_cred(), susfs_zygote_sid)' in (k/'hook/setuid_hook.c').read_text()
-
-          # The package observer triggers a full Manager scan only when
-          # packages.list changes AFTER the watcher has been registered.
-          # On existing installations this is not guaranteed, while
-          # on_boot_completed previously requested prune_only=True (no scan).
-          # Run the normal signature-verifying scanner at both lifecycle points;
-          # no manager UID or root permission is set directly by this bridge.
-          replace(k/'runtime/boot_event.c',
-                  '''    ksu_observer_init();
-              // Sanity check for safe mode only needs early-boot input samples.''',
-                  '''    ksu_observer_init();
-              // An already-installed manager may not trigger a later packages.list event.
-              track_throne(false);
-              // Sanity check for safe mode only needs early-boot input samples.''')
-          replace(k/'runtime/boot_event.c',
-                  '''    track_throne(true);
-              ksu_selinux_hide_drop_backup_if_unused();''',
-                  '''    // Rescan at boot-completed in case packages.list was not ready earlier.
-              // track_throne(false) also prunes stale allowlist entries.
-              track_throne(false);
-              ksu_selinux_hide_drop_backup_if_unused();''')
-          event = (k/'runtime/boot_event.c').read_text()
-          assert event.count('track_throne(false);') == 2
-          assert 'track_throne(true);' not in event
-          assert 'ksu_observer_init();' in event
-          # Keep all authorization and signature checks in place.
-          assert 'is_manager_apk(candidate_path)' in (k/'manager/throne_tracker.c').read_text()
-          assert 'allowed_for_su' in (k/'supercall/dispatch.c').read_text()
-
+          # Baseline experiment: preserve upstream KSU SELinux SID caching and
+          # manager lifecycle handling without custom SID / rescanning patches.
           # Restore the old devpts handler (with current allowlist checking).
           replace(k/'feature/sucompat.c', '#define SU_PATH', '''#ifdef CONFIG_KSU_SUSFS
           int ksu_handle_devpts(struct inode *inode)
@@ -430,11 +382,6 @@ jobs:
           replace(k/'supercall/dispatch.c', 'ret = 1; // SUSFS v2.0.0 does not provide per-process no_su flags', 'ret = susfs_is_current_proc_umounted() ? 0 : 1; // SUSFS 2.0 hook gate')
           print('Adapted KSU Next to SUSFS 2.0.0 hook ABI and lifecycle')
           PY
-
-      - name: Instrument and validate KSU root authorization (read-only)
-        run: |
-          set -euo pipefail
-          python3 "$GITHUB_WORKSPACE/scripts/instrument_ksu_root.py" "$CONFIG"
 
       - name: Configure KernelSU
         run: |
@@ -537,7 +484,7 @@ jobs:
           cd ./AnyKernel3
 
           # Zip the files in the AnyKernel3 directory with a new naming convention
-          ZIP_NAME="zuma_A16_Sultan_KSUN_updated_SUSFS_EXPERIMENTAL.zip"
+          ZIP_NAME="zuma_A16_Sultan_KSUN_baseline_hooks_TEST.zip"
           echo "Creating zip file $ZIP_NAME..."
           zip -r "../$ZIP_NAME" ./*
 
@@ -547,7 +494,7 @@ jobs:
           from pathlib import Path
           import hashlib, json, struct, zipfile
           root = Path('android_kernel_google_zuma')
-          zip_path = Path('zuma_A16_Sultan_KSUN_updated_SUSFS_EXPERIMENTAL.zip')
+          zip_path = Path('zuma_A16_Sultan_KSUN_baseline_hooks_TEST.zip')
           def sha(data):
               return hashlib.sha256(data).hexdigest()
           image = (root/'out/arch/arm64/boot/Image').read_bytes()
@@ -593,7 +540,7 @@ jobs:
         if: success()
         run: |
           printf 'Sultan kernel: 8ef1cd1f141052a6bc0c1a93fb9cf5d013e227d2\nKSU Next: 956ea0f526fd4e216f8d67844cb61b34a4c49bfe\nKernel patches: a7b2ea40283a6810d7479a58230fd2c3994ebfd5\nSUSFS: %s\n' "$SUSFS_SHA" | tee build-source-versions.txt
-          sha256sum zuma_A16_Sultan_KSUN_updated_SUSFS_EXPERIMENTAL.zip | tee build-sha256.txt
+          sha256sum zuma_A16_Sultan_KSUN_baseline_hooks_TEST.zip | tee build-sha256.txt
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
