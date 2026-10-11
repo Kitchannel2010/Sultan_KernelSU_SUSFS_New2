@@ -386,8 +386,9 @@ jobs:
               if (!filename_user || current_chrooted() ||
                   !ksu_is_allow_uid_for_current(current_uid().val))
                   return 0;
+              // strncpy_from_user_nofault includes the trailing NUL in its return value.
               len = strncpy_from_user_nofault(path, *filename_user, sizeof(path));
-              if (len == sizeof(su_path) - 1 && !memcmp(path, su_path, sizeof(su_path))) {
+              if (len == sizeof(su_path) && !memcmp(path, su_path, sizeof(su_path))) {
                   ksu_compat_sulog('a');
                   *filename_user = sh_user_path();
               }
