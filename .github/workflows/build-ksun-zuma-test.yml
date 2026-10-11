@@ -183,7 +183,8 @@ jobs:
           cd "$CONFIG"
 
           make CROSS_COMPILE=$GITHUB_WORKSPACE/gcc-14.2.0-nolibc/aarch64-linux/bin/aarch64-linux- CC=$GITHUB_WORKSPACE/gcc-14.2.0-nolibc/aarch64-linux/bin/aarch64-linux-gcc -j$(nproc --all) zuma_defconfig
-          grep '^CONFIG_KSU=y
+          grep '^CONFIG_KSU=y$' out/.config
+          grep '^CONFIG_KSU_SUSFS=y$' out/.config
           make CROSS_COMPILE=$GITHUB_WORKSPACE/gcc-14.2.0-nolibc/aarch64-linux/bin/aarch64-linux- CC=$GITHUB_WORKSPACE/gcc-14.2.0-nolibc/aarch64-linux/bin/aarch64-linux-gcc -j$(nproc --all)
 
       - name: Copy Images
@@ -217,7 +218,6 @@ jobs:
         run: |
           printf 'Sultan kernel: 8ef1cd1f141052a6bc0c1a93fb9cf5d013e227d2\nKSU Next: 956ea0f526fd4e216f8d67844cb61b34a4c49bfe\nKernel patches: a7b2ea40283a6810d7479a58230fd2c3994ebfd5\nSUSFS: %s\n' "$SUSFS_SHA" | tee build-source-versions.txt
           sha256sum zuma_A16_Sultan_KSUN_updated_SUSFS_EXPERIMENTAL.zip | tee build-sha256.txt
-
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -232,154 +232,7 @@ jobs:
         if: ${{ always() }}
         run: |
           set -e
-          CONFIG_DIR="$KERNEL_ROOT"
-          REJECTS_DIR="$GITHUB_WORKSPACE/patch-rejects"
-          mkdir -p "$REJECTS_DIR"
-          # Find all .rej files under the configuration directory
-          mapfile -t REJS < <(find "$CONFIG_DIR" -type f -name '*.rej')
-          REJ_COUNT=${#REJS[@]}
-          echo "Found $REJ_COUNT .rej files under $CONFIG_DIR"
-          echo "REJ_COUNT=$REJ_COUNT" >> $GITHUB_ENV
-          if [ "$REJ_COUNT" -gt 0 ]; then
-            for REJ in "${REJS[@]}"; do
-              # Relative path from $CONFIG
-              REL="${REJ#"$CONFIG_DIR"/}"
-              DEST="$REJECTS_DIR/$REL"
-              mkdir -p "$(dirname "$DEST")"
-              cp "$REJ" "$DEST"
-              # Copy the associated original file alongside the .rej
-              ORIG="${REJ%.rej}"
-              if [ -f "$ORIG" ]; then
-                ORIG_DEST="$REJECTS_DIR/${REL%.rej}"
-                mkdir -p "$(dirname "$ORIG_DEST")"
-                cp "$ORIG" "$ORIG_DEST"
-              fi
-              echo "$REL" >> "$REJECTS_DIR/index.txt"
-            done
-          fi
-
-      - name: Upload Rejects
-        if: ${{ always() && env.REJ_COUNT > 0 }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ env.FILE_NAME }}-Rejects
-          path: patch-rejects/
-          if-no-files-found: ignore
-          compression-level: 9 out/.config
-          grep '^CONFIG_KSU_SUSFS=y
-          make CROSS_COMPILE=$GITHUB_WORKSPACE/gcc-14.2.0-nolibc/aarch64-linux/bin/aarch64-linux- CC=$GITHUB_WORKSPACE/gcc-14.2.0-nolibc/aarch64-linux/bin/aarch64-linux-gcc -j$(nproc --all)
-
-      - name: Copy Images
-        run: |
-          echo "Changing to configuration directory: $CONFIG..."
-          cd "$CONFIG"
-
-          echo "Copying Image.lz4 and concatenating DTB files..."
-          cp ./out/arch/arm64/boot/Image.lz4 ../AnyKernel3/Image.lz4
-          if [ "zuma" == "gs201" ]; then
-            cat ./out/google-devices/gs201/dts/*.dtb > ../AnyKernel3/dtb
-            #cp ./out/google-devices/gs201/dts/dtbo.img ../AnyKernel3/dtbo.img
-          elif [ "zuma" == "zuma" ]; then
-            cat ./out/google-devices/zuma/dts/*.dtb > ../AnyKernel3/dtb
-          elif [ "zuma" == "zumapro" ]; then
-            cat ./out/google-devices/zumapro/dts/*.dtb > ../AnyKernel3/dtb
-          fi
-
-      - name: Create ZIP Files for Different Formats
-        run: |
-          echo "Navigating to AnyKernel3 directory..."
-          cd ./AnyKernel3
-
-          # Zip the files in the AnyKernel3 directory with a new naming convention
-          ZIP_NAME="zuma_A16_Sultan_WKSU_SUSFS.zip"
-          echo "Creating zip file $ZIP_NAME..."
-          zip -r "../$ZIP_NAME" ./*
-
-      - name: Upload Build Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: kernel-zuma
-          path: |
-            *.zip
-
-      - name: Scan and collect patch rejects
-        if: ${{ always() }}
-        run: |
-          set -e
-          CONFIG_DIR="$KERNEL_ROOT"
-          REJECTS_DIR="$GITHUB_WORKSPACE/patch-rejects"
-          mkdir -p "$REJECTS_DIR"
-          # Find all .rej files under the configuration directory
-          mapfile -t REJS < <(find "$CONFIG_DIR" -type f -name '*.rej')
-          REJ_COUNT=${#REJS[@]}
-          echo "Found $REJ_COUNT .rej files under $CONFIG_DIR"
-          echo "REJ_COUNT=$REJ_COUNT" >> $GITHUB_ENV
-          if [ "$REJ_COUNT" -gt 0 ]; then
-            for REJ in "${REJS[@]}"; do
-              # Relative path from $CONFIG
-              REL="${REJ#"$CONFIG_DIR"/}"
-              DEST="$REJECTS_DIR/$REL"
-              mkdir -p "$(dirname "$DEST")"
-              cp "$REJ" "$DEST"
-              # Copy the associated original file alongside the .rej
-              ORIG="${REJ%.rej}"
-              if [ -f "$ORIG" ]; then
-                ORIG_DEST="$REJECTS_DIR/${REL%.rej}"
-                mkdir -p "$(dirname "$ORIG_DEST")"
-                cp "$ORIG" "$ORIG_DEST"
-              fi
-              echo "$REL" >> "$REJECTS_DIR/index.txt"
-            done
-          fi
-
-      - name: Upload Rejects
-        if: ${{ always() && env.REJ_COUNT > 0 }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ env.FILE_NAME }}-Rejects
-          path: patch-rejects/
-          if-no-files-found: ignore
-          compression-level: 9 out/.config
-          make CROSS_COMPILE=$GITHUB_WORKSPACE/gcc-14.2.0-nolibc/aarch64-linux/bin/aarch64-linux- CC=$GITHUB_WORKSPACE/gcc-14.2.0-nolibc/aarch64-linux/bin/aarch64-linux-gcc -j$(nproc --all)
-
-      - name: Copy Images
-        run: |
-          echo "Changing to configuration directory: $CONFIG..."
-          cd "$CONFIG"
-
-          echo "Copying Image.lz4 and concatenating DTB files..."
-          cp ./out/arch/arm64/boot/Image.lz4 ../AnyKernel3/Image.lz4
-          if [ "zuma" == "gs201" ]; then
-            cat ./out/google-devices/gs201/dts/*.dtb > ../AnyKernel3/dtb
-            #cp ./out/google-devices/gs201/dts/dtbo.img ../AnyKernel3/dtbo.img
-          elif [ "zuma" == "zuma" ]; then
-            cat ./out/google-devices/zuma/dts/*.dtb > ../AnyKernel3/dtb
-          elif [ "zuma" == "zumapro" ]; then
-            cat ./out/google-devices/zumapro/dts/*.dtb > ../AnyKernel3/dtb
-          fi
-
-      - name: Create ZIP Files for Different Formats
-        run: |
-          echo "Navigating to AnyKernel3 directory..."
-          cd ./AnyKernel3
-
-          # Zip the files in the AnyKernel3 directory with a new naming convention
-          ZIP_NAME="zuma_A16_Sultan_WKSU_SUSFS.zip"
-          echo "Creating zip file $ZIP_NAME..."
-          zip -r "../$ZIP_NAME" ./*
-
-      - name: Upload Build Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: kernel-zuma
-          path: |
-            *.zip
-
-      - name: Scan and collect patch rejects
-        if: ${{ always() }}
-        run: |
-          set -e
-          CONFIG_DIR="$KERNEL_ROOT"
+          CONFIG_DIR="$GITHUB_WORKSPACE/$CONFIG"
           REJECTS_DIR="$GITHUB_WORKSPACE/patch-rejects"
           mkdir -p "$REJECTS_DIR"
           # Find all .rej files under the configuration directory
