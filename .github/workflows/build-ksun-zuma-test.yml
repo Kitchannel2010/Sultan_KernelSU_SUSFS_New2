@@ -3,7 +3,7 @@ name: Experimental Sultan zuma KSU baseline hooks
 on:
   workflow_dispatch:
   push:
-    branches: [ksun-upgrade]
+    branches: [ksun-upgrade, ksun-original-hooks-test]
     paths: [.github/workflows/build-ksun-zuma-test.yml]
 
 permissions:
