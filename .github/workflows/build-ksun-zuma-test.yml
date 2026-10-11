@@ -333,6 +333,17 @@ jobs:
           p = root/'drivers/input/input.c'
           replace(p, 'extern bool ksu_input_hook __read_mostly;', '#include <linux/jump_label.h>\nextern struct static_key_true ksu_is_input_hook_enabled;')
           replace(p, 'unlikely(ksu_input_hook)', 'static_branch_unlikely(&ksu_is_input_hook_enabled)')
+          # Restore the two external-directory commands that SUSFS 2.0 userspace needs.
+          replace(k/'supercall/dispatch.c', '''        case CMD_SUSFS_ADD_SUS_PATH_LOOP:
+                      susfs_add_sus_path_loop(arg);
+                      return 0;''', '''        case CMD_SUSFS_ADD_SUS_PATH_LOOP:
+                      susfs_add_sus_path_loop(arg);
+                      return 0;
+                  case CMD_SUSFS_SET_ANDROID_DATA_ROOT_PATH:
+                  case CMD_SUSFS_SET_SDCARD_ROOT_PATH:
+                      susfs_set_i_state_on_external_dir(arg);
+                      return 0;''')
+          replace(k/'supercall/dispatch.c', 'ret = 1; // SUSFS v2.0.0 does not provide per-process no_su flags', 'ret = susfs_is_current_proc_umounted() ? 0 : 1; // SUSFS 2.0 hook gate')
           print('Adapted KSU Next to SUSFS 2.0.0 hook ABI and lifecycle')
           PY
 
@@ -441,6 +452,54 @@ jobs:
           echo "Creating zip file $ZIP_NAME..."
           zip -r "../$ZIP_NAME" ./*
 
+      - name: Verify AnyKernel3 payload against build outputs
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib, json, struct, zipfile
+          root = Path('android_kernel_google_zuma')
+          zip_path = Path('zuma_A16_Sultan_KSUN_updated_SUSFS_EXPERIMENTAL.zip')
+          def sha(data):
+              return hashlib.sha256(data).hexdigest()
+          image = (root/'out/arch/arm64/boot/Image').read_bytes()
+          assert image[56:60] == b'ARM\x64', 'Not an ARM64 kernel image'
+          compressed = (root/'out/arch/arm64/boot/Image.lz4').read_bytes()
+          assert compressed[:4] in [bytes.fromhex('02214c18'), bytes.fromhex('04224d18')], 'Not LZ4'
+          dtbs = sorted((root/'out/google-devices/zuma/dts').glob('*.dtb'))
+          assert dtbs, 'No zuma DTBs'
+          joined = b''.join(p.read_bytes() for p in dtbs)
+          for p in dtbs:
+              data = p.read_bytes()
+              magic, size = struct.unpack_from('>II', data)
+              assert magic == 0xd00dfeed and size == len(data), f'Invalid DTB: {p}'
+              assert b'zuma' in data, f'Unexpected device tree: {p}'
+          required = ['anykernel.sh','META-INF/com/google/android/update-binary',
+                      'META-INF/com/google/android/updater-script','tools/ak3-core.sh',
+                      'tools/magiskboot','tools/busybox']
+          with zipfile.ZipFile(zip_path) as z:
+              assert z.testzip() is None, 'ZIP CRC failure'
+              assert len(z.namelist()) == len(set(z.namelist())), 'Duplicate ZIP entries'
+              assert all(not n.startswith('/') and '..' not in Path(n).parts for n in z.namelist())
+              assert z.read('Image.lz4') == compressed, 'ZIP kernel differs from build'
+              assert z.read('dtb') == joined, 'ZIP DTB differs from build'
+              for name in required:
+                  assert z.read(name) == (Path('AnyKernel3')/name).read_bytes(), name
+              script = z.read('anykernel.sh').decode()
+              for line in ['do.devicecheck=1','device.name1=husky','block=boot;',
+                           'block=vendor_kernel_boot;','is_slot_device=1;']:
+                  assert line in script, line
+          config = (root/'out/.config').read_text()
+          for flag in ['CONFIG_KSU=y','CONFIG_KSU_SUSFS=y']:
+              assert flag in config.splitlines(), flag
+          assert '#define SUSFS_VERSION "v2.0.0"' in (root/'include/linux/susfs.h').read_text()
+          report = {'zip':str(zip_path),'sha256':sha(zip_path.read_bytes()),
+                    'image_lz4_sha256':sha(compressed),'image_sha256':sha(image),
+                    'dtb_sha256':sha(joined),'dtbs':[p.name for p in dtbs],
+                    'installation_files':required,'boot_compatibility':'NOT TESTED'}
+          Path('build-verification.json').write_text(json.dumps(report, indent=2)+'\n')
+          print(json.dumps(report, indent=2))
+          PY
+
       - name: Write build source report
         if: success()
         run: |
@@ -454,6 +513,9 @@ jobs:
             *.zip
             build-source-versions.txt
             build-sha256.txt
+            build-verification.json
+            android_kernel_google_zuma/out/.config
+          include-hidden-files: true
           retention-days: 30
 
       - name: Scan and collect patch rejects
