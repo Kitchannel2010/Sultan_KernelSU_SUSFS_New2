@@ -102,9 +102,18 @@ jobs:
           cp ../susfs4ksu/kernel_patches/include/linux/* ./include/linux/
 
           # Change to common directory and apply SUSFS patch
-          patch --batch -p1 < 50_add_susfs_in_gki-android14-6.1.patch
+          # Old Sultan modifies newuname. The historical SUSFS patch's
+          # sole kernel/sys.c newuname hunk is replaced by sys.c_fix.patch.
+          if ! patch --batch -p1 < 50_add_susfs_in_gki-android14-6.1.patch; then
+            test -f kernel/sys.c.rej
+            test "$(find . -name '*.rej' | wc -l)" -eq 1
+            grep -q 'susfs_spoof_uname' kernel/sys.c.rej
+            echo 'Using the Sultan-specific newuname fix for the known reject'
+          fi
           cp ../kernel_patches/sultan/sys.c_fix.patch ./
           patch --batch -p1 < sys.c_fix.patch
+          grep -q 'susfs_spoof_uname(&tmp)' kernel/sys.c
+          rm -f kernel/sys.c.rej
           if find . -name '*.rej' | grep -q .; then echo 'ERROR: patch rejects found'; find . -name '*.rej'; exit 1; fi
           grep -n 'SUSFS_VERSION' include/linux/susfs.h || true
 
