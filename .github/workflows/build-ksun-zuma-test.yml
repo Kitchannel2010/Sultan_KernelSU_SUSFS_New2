@@ -1,9 +1,9 @@
-name: Experimental Sultan zuma updated KSU Next
+name: Experimental Sultan zuma KSU sucompat postboot fix
 
 on:
   workflow_dispatch:
   push:
-    branches: [ksun-upgrade]
+    branches: [ksun-upgrade, ksun-sucompat-postboot-fix]
     paths: [.github/workflows/build-ksun-zuma-test.yml]
 
 permissions:
@@ -403,9 +403,9 @@ jobs:
               replace(p, 'extern bool ksu_su_compat_enabled __read_mostly;', '#include <linux/jump_label.h>\nextern struct static_key_true ksu_su_compat_enabled;')
               replace(p, '!ksu_su_compat_enabled)', '!static_branch_unlikely(&ksu_su_compat_enabled))')
           p = root/'fs/exec.c'
-          replace(p, 'extern bool ksu_execveat_hook __read_mostly;', 'extern struct static_key_true is_first_zygote;')
+          replace(p, 'extern bool ksu_execveat_hook __read_mostly;', 'extern struct static_key_true is_first_zygote;\nextern struct static_key_true ksu_su_compat_enabled;')
           replace(p, 'extern bool susfs_is_boot_completed_triggered __read_mostly;', 'extern bool ksu_boot_completed;')
-          replace(p, 'ksu_execveat_hook || !susfs_is_boot_completed_triggered', 'static_branch_unlikely(&is_first_zygote) || !ksu_boot_completed')
+          # Keep intercepting /system/bin/su after first zygote and boot-completed.\n          # Original bridge stopped calling ksu_handle_execveat() after boot.\n          # Manager ioctl root still worked, while third-party su commands failed.\n          replace(p, 'ksu_execveat_hook || !susfs_is_boot_completed_triggered',\n                  'static_branch_unlikely(&is_first_zygote) || !ksu_boot_completed || static_branch_unlikely(&ksu_su_compat_enabled)')
           p = root/'fs/namespace.c'
           s = p.read_text()
           assert 'susfs_is_boot_completed_triggered' in s
@@ -537,7 +537,7 @@ jobs:
           cd ./AnyKernel3
 
           # Zip the files in the AnyKernel3 directory with a new naming convention
-          ZIP_NAME="zuma_A16_Sultan_KSUN_updated_SUSFS_EXPERIMENTAL.zip"
+          ZIP_NAME="zuma_A16_Sultan_KSUN_SuCompatPostBoot_TEST.zip"
           echo "Creating zip file $ZIP_NAME..."
           zip -r "../$ZIP_NAME" ./*
 
@@ -547,7 +547,7 @@ jobs:
           from pathlib import Path
           import hashlib, json, struct, zipfile
           root = Path('android_kernel_google_zuma')
-          zip_path = Path('zuma_A16_Sultan_KSUN_updated_SUSFS_EXPERIMENTAL.zip')
+          zip_path = Path('zuma_A16_Sultan_KSUN_SuCompatPostBoot_TEST.zip')
           def sha(data):
               return hashlib.sha256(data).hexdigest()
           image = (root/'out/arch/arm64/boot/Image').read_bytes()
@@ -593,7 +593,7 @@ jobs:
         if: success()
         run: |
           printf 'Sultan kernel: 8ef1cd1f141052a6bc0c1a93fb9cf5d013e227d2\nKSU Next: 956ea0f526fd4e216f8d67844cb61b34a4c49bfe\nKernel patches: a7b2ea40283a6810d7479a58230fd2c3994ebfd5\nSUSFS: %s\n' "$SUSFS_SHA" | tee build-source-versions.txt
-          sha256sum zuma_A16_Sultan_KSUN_updated_SUSFS_EXPERIMENTAL.zip | tee build-sha256.txt
+          sha256sum zuma_A16_Sultan_KSUN_SuCompatPostBoot_TEST.zip | tee build-sha256.txt
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
