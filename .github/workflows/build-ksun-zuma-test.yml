@@ -13,6 +13,9 @@ jobs:
   build-kernel-sultan-kernelsu-susfs:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout build tooling
+        uses: actions/checkout@v4
+
       #- name: Maximize Build Space
       #  uses: AdityaGarg8/remove-unwanted-software@v5
       #  with:
