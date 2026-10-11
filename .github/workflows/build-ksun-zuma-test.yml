@@ -126,7 +126,7 @@ jobs:
           src = p.read_text()
           changes = [
               (
-                  '             susfs_start_sdcard_monitor_fn();',
+                  '            susfs_start_sdcard_monitor_fn();',
                   ''
               ),
               (
