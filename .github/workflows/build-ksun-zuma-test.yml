@@ -82,6 +82,7 @@ jobs:
           echo "Adding KernelSU..."
           set -euo pipefail
           git clone https://github.com/pershoot/KernelSU-Next.git KernelSU-Next
+          git -C KernelSU-Next fetch origin 956ea0f526fd4e216f8d67844cb61b34a4c49bfe
           git -C KernelSU-Next checkout --detach 956ea0f526fd4e216f8d67844cb61b34a4c49bfe
           test "$(git -C KernelSU-Next rev-parse HEAD)" = "956ea0f526fd4e216f8d67844cb61b34a4c49bfe"
           ln -s "$(realpath --relative-to=drivers KernelSU-Next/kernel)" drivers/kernelsu
