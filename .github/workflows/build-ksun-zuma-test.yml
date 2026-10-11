@@ -272,6 +272,28 @@ jobs:
           }''')
           replace(k/'supercall/supercall.c', 'static_branch_unlikely(&susfs_is_uname_spoof_buffer_set)', 'ksu_susfs_uname_active()')
 
+          # SUSFS v2.0.0 requires Zygote/zygote_next SIDs for setresuid()
+          # to install the Manager driver FD and disable app seccomp.
+          # This KSUN source defines susfs_set_batch_sid() but never invokes it;
+          # normal cache_sid() only populates the separate cached_*_sid fields.
+          # Call it after the policy has loaded, at the existing cache_sid() sites.
+          replace(k/'selinux/selinux.c', '''    }
+}
+
+/*
+ * Fast path: compare task's SID directly against cached value.''', '''    }
+#ifdef CONFIG_KSU_SUSFS
+    // The SUSFS setresuid hook checks susfs_zygote_sid, not cached_zygote_sid.
+    // Without this call those SIDs stay zero and Manager root cannot start.
+    susfs_set_batch_sid();
+#endif
+}
+
+/*
+ * Fast path: compare task's SID directly against cached value.''')
+          assert (k/'selinux/selinux.c').read_text().count('    susfs_set_batch_sid();') == 1
+          assert 'susfs_is_sid_equal(current_cred(), susfs_zygote_sid)' in (k/'hook/setuid_hook.c').read_text()
+
           # Restore the old devpts handler (with current allowlist checking).
           replace(k/'feature/sucompat.c', '#define SU_PATH', '''#ifdef CONFIG_KSU_SUSFS
           int ksu_handle_devpts(struct inode *inode)
