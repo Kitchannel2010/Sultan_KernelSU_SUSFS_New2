@@ -67,7 +67,7 @@ jobs:
           git -C android_kernel_google_zuma fetch --depth=1 origin 8ef1cd1f141052a6bc0c1a93fb9cf5d013e227d2
           git -C android_kernel_google_zuma checkout --detach 8ef1cd1f141052a6bc0c1a93fb9cf5d013e227d2
           git clone https://gitlab.com/simonpunk/susfs4ksu.git -b "$SUSFS_BRANCH"
-          SUSFS_SHA="$(git -C susfs4ksu rev-list -1 --before='2026-01-08T18:18:16Z' HEAD)"
+          SUSFS_SHA="46fb6bb2adc5dde72673009e0cd7e57e3afe2036"
           test -n "$SUSFS_SHA"
           git -C susfs4ksu checkout --detach "$SUSFS_SHA"
           echo "SUSFS_SHA=$SUSFS_SHA" >> "$GITHUB_ENV"
@@ -202,6 +202,139 @@ jobs:
           rm -f kernel/sys.c.rej
           if find . -name '*.rej' | grep -q .; then echo 'ERROR: patch rejects found'; find . -name '*.rej'; exit 1; fi
           grep -n 'SUSFS_VERSION' include/linux/susfs.h || true
+
+      - name: Bridge SUSFS 2.0.0 and updated KSU hook APIs
+        run: |
+          set -euo pipefail
+          python3 - "$CONFIG" <<'PY'
+          from pathlib import Path
+          import sys
+          root = Path(sys.argv[1])
+          k = root / 'KernelSU-Next/kernel'
+          def replace(path, old, new, count=1):
+              p = Path(path)
+              s = p.read_text()
+              assert s.count(old) == count, (str(p), old, s.count(old), count)
+              p.write_text(s.replace(old, new))
+
+          # patch_memory is required by selinux_hide even when KPROBES is off.
+          replace(k/'Kbuild', '''kernelsu-objs += hook/lsm_hook.o
+          ifdef KSU_ARCH
+          kernelsu-objs += hook/$(KSU_ARCH)/patch_memory.o
+          endif
+          endif''', '''kernelsu-objs += hook/lsm_hook.o
+          endif
+          ifdef KSU_ARCH
+          kernelsu-objs += hook/$(KSU_ARCH)/patch_memory.o
+          endif''')
+
+          # SUSFS 2.0 resolves paths synchronously; it has no later extra-work queue.
+          replace(k/'hook/setuid_hook.c', '''extern struct work_struct susfs_extra_works;
+
+          static inline void ksu_handle_extra_susfs_work(void)
+          {
+              if (work_pending(&susfs_extra_works))
+                  return;
+
+              schedule_work(&susfs_extra_works);
+          }
+          ''', '')
+          replace(k/'hook/setuid_hook.c', '''        // Handle extra susfs work
+                  ksu_handle_extra_susfs_work();''', '        // SUSFS 2.0.0 has no asynchronous extra-work queue.', 2)
+          replace(k/'supercall/dispatch.c', 'extern struct work_struct susfs_extra_works;\n', '')
+          replace(k/'supercall/dispatch.c', '''#ifdef CONFIG_KSU_SUSFS
+          #ifdef CONFIG_KSU_SUSFS_SUS_PATH
+                      if (!work_pending(&susfs_extra_works)) {
+                          schedule_work(&susfs_extra_works);
+                      }
+          #endif
+
+          #endif
+          ''', '')
+          replace(k/'supercall/dispatch.c', '''#if defined(CONFIG_KSU_SUSFS) && defined(CONFIG_KSU_SUSFS_SUS_PATH)
+                  if (!work_pending(&susfs_extra_works)) {
+                      schedule_work(&susfs_extra_works);
+                  }
+          #endif
+          ''', '')
+
+          # Query the actual old uname API instead of inventing a static key/state.
+          replace(k/'supercall/supercall.c', 'extern struct static_key_false susfs_is_uname_spoof_buffer_set;', '''#include <linux/susfs.h>
+          static bool ksu_susfs_uname_active(void)
+          {
+              struct new_utsname probe = {0};
+              susfs_spoof_uname(&probe);
+              return probe.release[0] != '\\0';
+          }''')
+          replace(k/'supercall/supercall.c', 'static_branch_unlikely(&susfs_is_uname_spoof_buffer_set)', 'ksu_susfs_uname_active()')
+
+          # Restore the old devpts handler (with current allowlist checking).
+          replace(k/'feature/sucompat.c', '#define SU_PATH', '''#ifdef CONFIG_KSU_SUSFS
+          int ksu_handle_devpts(struct inode *inode)
+          {
+              struct inode_security_struct *sec;
+              uid_t uid = current_uid().val;
+              if (!current->mm || !inode || uid % 100000 < 10000)
+                  return 0;
+              if (!ksu_is_allow_uid_for_current(uid))
+                  return 0;
+              if (ksu_file_sid) {
+                  sec = selinux_inode(inode);
+                  if (sec)
+                      sec->sid = ksu_file_sid;
+              }
+              return 0;
+          }
+          #endif
+
+          #define SU_PATH''')
+
+          # This Sultan's do_faccessat passes a userspace string, not struct filename.
+          p = k/'feature/sucompat.c'
+          s = p.read_text()
+          start = s.index('#ifdef CONFIG_KSU_SUSFS\nint ksu_handle_faccessat(')
+          end = s.index('\n#ifdef CONFIG_KSU_SUSFS\nint ksu_handle_stat(', start)
+          s = s[:start] + '''int ksu_handle_faccessat(int *dfd, const char __user **filename_user,
+                                  int *mode, int *__unused_flags)
+          {
+              char path[sizeof(su_path)] = {0};
+              long len;
+              if (!filename_user || current_chrooted() ||
+                  !ksu_is_allow_uid_for_current(current_uid().val))
+                  return 0;
+              len = strncpy_from_user_nofault(path, *filename_user, sizeof(path));
+              if (len == sizeof(su_path) - 1 && !memcmp(path, su_path, sizeof(su_path))) {
+                  ksu_compat_sulog('a');
+                  *filename_user = sh_user_path();
+              }
+              return 0;
+          }
+          ''' + s[end:]
+          p.write_text(s)
+          replace(k/'feature/sucompat.h', 'int ksu_handle_faccessat(int *dfd, struct filename **filename, int *mode, int *__unused_flags);', 'int ksu_handle_faccessat(int *dfd, const char __user **filename_user, int *mode, int *__unused_flags);')
+
+          # Adapt only integration call sites to the real KSU static keys/state.
+          for name in ['fs/exec.c', 'fs/open.c', 'fs/stat.c']:
+              p = root/name
+              replace(p, 'extern bool ksu_su_compat_enabled __read_mostly;', '#include <linux/jump_label.h>\nextern struct static_key_true ksu_su_compat_enabled;')
+              replace(p, '!ksu_su_compat_enabled)', '!static_branch_unlikely(&ksu_su_compat_enabled))')
+          p = root/'fs/exec.c'
+          replace(p, 'extern bool ksu_execveat_hook __read_mostly;', 'extern struct static_key_true is_first_zygote;')
+          replace(p, 'extern bool susfs_is_boot_completed_triggered __read_mostly;', 'extern bool ksu_boot_completed;')
+          replace(p, 'ksu_execveat_hook || !susfs_is_boot_completed_triggered', 'static_branch_unlikely(&is_first_zygote) || !ksu_boot_completed')
+          p = root/'fs/namespace.c'
+          s = p.read_text()
+          assert 'susfs_is_boot_completed_triggered' in s
+          p.write_text(s.replace('susfs_is_boot_completed_triggered', 'ksu_boot_completed'))
+          p = root/'fs/read_write.c'
+          replace(p, 'extern bool ksu_vfs_read_hook __read_mostly;', '#include <linux/jump_label.h>\nextern struct static_key_true ksu_is_init_rc_hook_enabled;')
+          replace(p, 'unlikely(ksu_vfs_read_hook)', 'static_branch_unlikely(&ksu_is_init_rc_hook_enabled)')
+          replace(p, 'extern __attribute__((cold)) int ksu_handle_sys_read', 'extern void ksu_handle_sys_read')
+          p = root/'drivers/input/input.c'
+          replace(p, 'extern bool ksu_input_hook __read_mostly;', '#include <linux/jump_label.h>\nextern struct static_key_true ksu_is_input_hook_enabled;')
+          replace(p, 'unlikely(ksu_input_hook)', 'static_branch_unlikely(&ksu_is_input_hook_enabled)')
+          print('Adapted KSU Next to SUSFS 2.0.0 hook ABI and lifecycle')
+          PY
 
       - name: Configure KernelSU
         run: |
