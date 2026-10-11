@@ -89,6 +89,22 @@ jobs:
           sed -i '/endmenu/i source "drivers/kernelsu/Kconfig"' drivers/Kconfig
           test -f drivers/kernelsu/Kconfig
 
+      - name: Adapt newer KSU sucompat optimization to SUSFS v2.0.0
+        run: |
+          set -euo pipefail
+          file="$CONFIG/KernelSU-Next/kernel/feature/sucompat.c"
+          # SUSFS 2.0.0 does not provide the optional per-process no_su flag.
+          # Keep the early return for unrelated init execve children, but do not
+          # attempt to set the flag that was introduced in later SUSFS versions.
+          grep -Fq 'susfs_is_current_proc_no_su()' "$file"
+          grep -Fq 'susfs_set_current_proc_no_su()' "$file"
+          sed -i 's/if (likely(!ksu_is_zygote_or_adbd(filename->name, len)) \&\&/if (likely(!ksu_is_zygote_or_adbd(filename->name, len)))/' "$file"
+          sed -i '/!susfs_is_current_proc_no_su()/d' "$file"
+          sed -i '/susfs_set_current_proc_no_su();/d' "$file"
+          sed -i '/pr_info("susfs: mark no sucompat checks for pid:/d' "$file"
+          if grep -Eq 'susfs_(is|set)_current_proc_no_su' "$file"; then exit 1; fi
+          sed -n '185,210p' "$file"
+
       - name: Apply SUSFS Patches
         run: |
           echo "Changing to configuration directory: $CONFIG..."
