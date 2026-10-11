@@ -68,3 +68,30 @@ jobs:
           path: ksun-port-report/
           if-no-files-found: warn
           retention-days: 30
+
+      - name: Signal unresolved forward-port conflicts
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          report="$GITHUB_WORKSPACE/ksun-port-report"
+          if [ ! -f "$report/result.txt" ]; then
+            echo "::error::The compatibility check did not produce a result."
+            exit 1
+          fi
+          if grep -q "Manual port needed" "$report/result.txt"; then
+            count="$(wc -l < "$report/conflicting-files.txt")"
+            {
+              echo "### KernelSU forward-port requires manual changes"
+              echo "Conflicting files: $count"
+              echo ""
+              echo "Download the ksun-port-report artifact for the exact file list and merge markers."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::KernelSU Next / SUSFS forward-port has $count unresolved merge conflicts. This is NOT a bootable kernel."
+            exit 1
+          fi
+          if ! grep -q "No textual merge conflicts" "$report/result.txt"; then
+            echo "::error::Unexpected compatibility check result."
+            exit 1
+          fi
+          echo "Textual merge completed without conflicts. Kernel compilation and boot compatibility are NOT yet verified." >> "$GITHUB_STEP_SUMMARY"
