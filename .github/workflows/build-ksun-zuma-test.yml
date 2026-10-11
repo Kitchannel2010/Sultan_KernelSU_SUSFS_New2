@@ -278,19 +278,19 @@ jobs:
           # normal cache_sid() only populates the separate cached_*_sid fields.
           # Call it after the policy has loaded, at the existing cache_sid() sites.
           replace(k/'selinux/selinux.c', '''    }
-}
+          }
 
-/*
- * Fast path: compare task's SID directly against cached value.''', '''    }
-#ifdef CONFIG_KSU_SUSFS
-    // The SUSFS setresuid hook checks susfs_zygote_sid, not cached_zygote_sid.
-    // Without this call those SIDs stay zero and Manager root cannot start.
-    susfs_set_batch_sid();
-#endif
-}
+          /*
+           * Fast path: compare task's SID directly against cached value.''', '''    }
+          #ifdef CONFIG_KSU_SUSFS
+              // The SUSFS setresuid hook checks susfs_zygote_sid, not cached_zygote_sid.
+              // Without this call those SIDs stay zero and Manager root cannot start.
+              susfs_set_batch_sid();
+          #endif
+          }
 
-/*
- * Fast path: compare task's SID directly against cached value.''')
+          /*
+           * Fast path: compare task's SID directly against cached value.''')
           assert (k/'selinux/selinux.c').read_text().count('    susfs_set_batch_sid();') == 1
           assert 'susfs_is_sid_equal(current_cred(), susfs_zygote_sid)' in (k/'hook/setuid_hook.c').read_text()
 
