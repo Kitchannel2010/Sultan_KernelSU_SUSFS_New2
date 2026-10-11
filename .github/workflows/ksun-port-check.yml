@@ -1,0 +1,70 @@
+name: KernelSU Next SUSFS port check
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - ksun-upgrade
+    paths:
+      - .github/workflows/ksun-port-check.yml
+
+permissions:
+  contents: read
+
+jobs:
+  port-check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Check out pinned KernelSU Next baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone https://github.com/KernelSU-Next/KernelSU-Next.git ksun
+          cd ksun
+          git checkout --detach 5a4a71874caaad06aa126f761c93391de1d32361
+          git config user.name "Sultan port checker"
+          git config user.email "checker@example.invalid"
+
+      - name: Apply pinned SUSFS integration patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fL --retry 3 -o /tmp/ksun-susfs.patch \
+            https://raw.githubusercontent.com/WildKernels/kernel_patches/c5d6c6e5708966bcdbddbe6f43b26ed283eccbc1/wild/ksun-5a4a718-susfs-f7ae19ef-gki-android14-6.1.patch
+          cd ksun
+          git apply --check /tmp/ksun-susfs.patch
+          git apply --index /tmp/ksun-susfs.patch
+          git commit -m "Apply pinned SUSFS integration patch"
+
+      - name: Compare compatibility with newer KernelSU Next
+        shell: bash
+        run: |
+          set -uo pipefail
+          report="$GITHUB_WORKSPACE/ksun-port-report"
+          mkdir -p "$report"
+          cd ksun
+          target=cd4a6b468653fb9640caaf203c05e07609ba5da1
+          git fetch origin "$target"
+          printf 'BASE=%s\nTARGET=%s\nPATCH_COMMIT=%s\n' \
+            5a4a71874caaad06aa126f761c93391de1d32361 "$target" \
+            c5d6c6e5708966bcdbddbe6f43b26ed283eccbc1 > "$report/versions.txt"
+          if git merge --no-commit --no-ff "$target" > "$report/merge-output.txt" 2>&1; then
+            echo "No textual merge conflicts" | tee "$report/result.txt"
+          else
+            echo "Manual port needed" | tee "$report/result.txt"
+          fi
+          git status --short > "$report/git-status.txt"
+          git diff --name-only --diff-filter=U > "$report/conflicting-files.txt"
+          git diff --cc > "$report/conflict-diff.txt"
+          cat "$report/result.txt"
+          cat "$report/conflicting-files.txt"
+
+      - name: Upload conflict diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ksun-port-report
+          path: ksun-port-report/
+          if-no-files-found: warn
+          retention-days: 30
