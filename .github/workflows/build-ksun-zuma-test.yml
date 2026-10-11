@@ -105,6 +105,17 @@ jobs:
           if grep -Eq 'susfs_(is|set)_current_proc_no_su' "$file"; then exit 1; fi
           sed -n '185,210p' "$file"
 
+          # SUSFS 2.0.0 can mark processes as umounted, but lacks newer
+          # zygote_next-specific and no_su flags. Keep the existing normal
+          # SUSFS umounted flag and mount-work scheduling intact.
+          hook="$CONFIG/KernelSU-Next/kernel/hook/setuid_hook.c"
+          grep -Fq 'susfs_set_current_proc_no_su();' "$hook"
+          grep -Fq 'susfs_set_current_proc_umounted_for_zygote_next();' "$hook"
+          sed -i '/susfs_set_current_proc_no_su();/d' "$hook"
+          sed -i '/susfs_set_current_proc_umounted_for_zygote_next();/d' "$hook"
+          if grep -Eq 'susfs_set_current_proc_(no_su|umounted_for_zygote_next)' "$hook"; then exit 1; fi
+          grep -n 'susfs_set_current_proc_umounted();' "$hook"
+
       - name: Apply SUSFS Patches
         run: |
           echo "Changing to configuration directory: $CONFIG..."
