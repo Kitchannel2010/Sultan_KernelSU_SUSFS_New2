@@ -160,16 +160,17 @@ jobs:
           import sys
           p = Path(sys.argv[1])
           src = p.read_text()
-          old = '''    return (susfs_starts_with(filename, "/apex/") &&
-                susfs_ends_with(filename, "/adbd"));'''
-          new = '''    size_t len = strlen(filename);
-              return len >= sizeof("/apex/") - 1 &&
-                  len >= sizeof("/adbd") - 1 &&
-                  strncmp(filename, "/apex/", sizeof("/apex/") - 1) == 0 &&
-                  strcmp(filename + len - (sizeof("/adbd") - 1), "/adbd") == 0;'''
-          if src.count(old) != 1:
-              raise SystemExit(f"Expected one exact adb_root match, found {src.count(old)}")
-          src = src.replace(old, new)
+          pairs = [
+              ('susfs_starts_with(filename, "/apex/")',
+               'strncmp(filename, "/apex/", sizeof("/apex/") - 1) == 0'),
+              ('susfs_ends_with(filename, "/adbd")',
+               '(strlen(filename) >= sizeof("/adbd") - 1 && '
+               'strcmp(filename + strlen(filename) - (sizeof("/adbd") - 1), "/adbd") == 0)'),
+          ]
+          for old, new in pairs:
+              if src.count(old) != 1:
+                  raise SystemExit(f"Expected one adb_root call {old!r}, found {src.count(old)}")
+              src = src.replace(old, new)
           p.write_text(src)
           PY
           ! grep -Eq 'susfs_(starts|ends)_with' "$file"
