@@ -272,6 +272,31 @@ jobs:
           }''')
           replace(k/'supercall/supercall.c', 'static_branch_unlikely(&susfs_is_uname_spoof_buffer_set)', 'ksu_susfs_uname_active()')
 
+          # Evidence from the Pixel 8 Pro boot log:
+          # find_kernel_symbol_exact("security_secctx_to_secid") returned NULL,
+          # which prevented transition to u:r:ksu:s0 on every GRANT_ROOT call.
+          # This built-in Sultan 6.1 kernel provides all three public LSM APIs
+          # directly (include/linux/security.h, security/security.c).
+          # SUSFS itself already invokes security_secctx_to_secid successfully.
+          # Only use direct LSM APIs for the built-in SUSFS integration; keep
+          # standard upstream dynamic symbol resolution for other configurations.
+          replace(k/'selinux/selinux.c',
+                  '#include "linux/version.h"',
+                  '#include "linux/version.h"\\n#include <linux/security.h>')
+          replace(k/'selinux/selinux.c',
+                  '''#ifdef CONFIG_ANDROID
+          #define ksu_security_secid_to_secctx security_secid_to_secctx''',
+                  '''#if defined(CONFIG_KSU_SUSFS)
+          #define ksu_security_secctx_to_secid security_secctx_to_secid
+          #define ksu_security_secid_to_secctx security_secid_to_secctx
+          #define ksu_security_release_secctx security_release_secctx
+          #elif defined(CONFIG_ANDROID)
+          #define ksu_security_secid_to_secctx security_secid_to_secctx''')
+          selinux_src = (k/'selinux/selinux.c').read_text()
+          assert '#define ksu_security_secctx_to_secid security_secctx_to_secid' in selinux_src
+          assert '#include <linux/security.h>' in selinux_src
+          assert 'error = ksu_security_secctx_to_secid(domain, strlen(domain), &sid);' in selinux_src
+
           # SUSFS v2.0.0 requires Zygote/zygote_next SIDs for setresuid()
           # to install the Manager driver FD and disable app seccomp.
           # This KSUN source defines susfs_set_batch_sid() but never invokes it;
