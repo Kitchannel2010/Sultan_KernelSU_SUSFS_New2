@@ -151,6 +151,29 @@ jobs:
           p.write_text(src)
           PY
 
+      - name: Adapt KSU adb_root path helpers to old SUSFS v2.0.0
+        run: |
+          set -euo pipefail
+          file="$CONFIG/KernelSU-Next/kernel/feature/adb_root.c"
+          python3 - "$file" <<'PY'
+          from pathlib import Path
+          import sys
+          p = Path(sys.argv[1])
+          src = p.read_text()
+          old = '''    return (susfs_starts_with(filename, "/apex/") &&
+                susfs_ends_with(filename, "/adbd"));'''
+          new = '''    size_t len = strlen(filename);
+              return len >= sizeof("/apex/") - 1 &&
+                  len >= sizeof("/adbd") - 1 &&
+                  strncmp(filename, "/apex/", sizeof("/apex/") - 1) == 0 &&
+                  strcmp(filename + len - (sizeof("/adbd") - 1), "/adbd") == 0;'''
+          if src.count(old) != 1:
+              raise SystemExit(f"Expected one exact adb_root match, found {src.count(old)}")
+          src = src.replace(old, new)
+          p.write_text(src)
+          PY
+          ! grep -Eq 'susfs_(starts|ends)_with' "$file"
+
       - name: Apply SUSFS Patches
         run: |
           echo "Changing to configuration directory: $CONFIG..."
