@@ -1,9 +1,9 @@
-name: Experimental Sultan zuma KSU sucompat postboot fix
+name: Experimental Sultan zuma KSU sucompat and SELinux status fixes
 
 on:
   workflow_dispatch:
   push:
-    branches: [ksun-upgrade, ksun-sucompat-postboot-fix]
+    branches: [ksun-upgrade, ksun-sucompat-postboot-fix, ksun-selinux-hide-status-fix]
     paths: [.github/workflows/build-ksun-zuma-test.yml]
 
 permissions:
@@ -433,6 +433,102 @@ jobs:
                       return 0;''')
           replace(k/'supercall/dispatch.c', 'ret = 1; // SUSFS v2.0.0 does not provide per-process no_su flags', 'ret = susfs_is_current_proc_umounted() ? 0 : 1; // SUSFS 2.0 hook gate')
           print('Adapted KSU Next to SUSFS 2.0.0 hook ABI and lifecycle')
+          PY
+
+      - name: Integrate SELinux status hide without kallsyms rodata lookup
+        run: |
+          set -euo pipefail
+          python3 - "$CONFIG" <<'PY'
+          from pathlib import Path
+          import sys
+          root = Path(sys.argv[1])
+          k = root / 'KernelSU-Next/kernel'
+          def replace(path, old, new, count=1):
+              p = Path(path)
+              s = p.read_text()
+              assert s.count(old) == count, (str(p), old, s.count(old), count)
+              p.write_text(s.replace(old, new))
+
+          # This Sultan 6.1 kernel does not expose static const
+          # sel_handle_status_ops in kallsyms without KALLSYMS_ALL.
+          # Wire a direct manual hook at the SELinux status open site, avoiding
+          # any runtime writes to read-only file_operations and avoiding scans.
+          # The hook receives a valid status page: selinux_kernel_status_page()
+          # was just called in this function.
+          p = root/'security/selinux/selinuxfs.c'
+          replace(p,
+                  'static int sel_open_handle_status(struct inode *inode, struct file *filp)',
+                  '''#if defined(CONFIG_KSU) && defined(CONFIG_KSU_SUSFS)
+          extern bool ksu_selinux_hide_status_open(struct file *filp);
+          #endif
+          static int sel_open_handle_status(struct inode *inode, struct file *filp)''')
+          replace(p,
+                  '''\tfilp->private_data = status;
+
+          \treturn 0;
+          }''',
+                  '''#if defined(CONFIG_KSU) && defined(CONFIG_KSU_SUSFS)
+          \t/* KSU-SUSFS: status-page proxy for app UIDs; fallback is stock. */
+          \tif (ksu_selinux_hide_status_open(filp))
+          \t\treturn 0;
+          #endif
+          \tfilp->private_data = status;
+
+          \treturn 0;
+          }''')
+
+          p = k/'feature/selinux_hide.c'
+          # Populate the snapshot on the first real status open, once SELinux
+          # has allocated a page. This fixes the observed early boot error
+          # "fake status is not initialized after post-fs-data".
+          replace(p, 'static void hook_selinux_status_open();', '''#ifdef CONFIG_KSU_SUSFS
+          bool ksu_selinux_hide_status_open(struct file *filp)
+          {
+              struct page *page;
+              if (unlikely(!READ_ONCE(fake_status)))
+                  initialize_fake_status();
+              if (likely(current_uid().val < 10000 ||
+                         !READ_ONCE(ksu_selinux_hide_enabled)))
+                  return false;
+
+              mutex_lock(&selinux_state.status_lock);
+              page = fake_status;
+              if (page)
+                  filp->private_data = page; /* struct page*, required by mmap */
+              mutex_unlock(&selinux_state.status_lock);
+
+              return page != NULL;
+          }
+          #endif
+
+          static void hook_selinux_status_open();''')
+          # The original runtime rodata hook cannot work on this kernel.
+          # Keep it untouched for non-SUSFS builds.
+          replace(p, '''static void hook_selinux_status_open()
+          {
+              if (orig_sel_open_handle_status)''', '''static void hook_selinux_status_open()
+          {
+          #ifdef CONFIG_KSU_SUSFS
+              /* Compiled-in selinuxfs.c hook handles the SUSFS path. */
+              return;
+          #endif
+              if (orig_sel_open_handle_status)''')
+          # With the compiled-in hook, the snapshot can be deferred until the
+          # status inode has created its real backing page.
+          replace(p,
+                  '''    if (!fake_status) {
+                  pr_err("selinux_hide: fake status is not initialized after post-fs-data!\\n");
+              }''',
+                  '''    if (!fake_status) {
+          #ifdef CONFIG_KSU_SUSFS
+                  pr_info("selinux_hide: status snapshot pending first selinuxfs/status open\\n");
+          #else
+                  pr_err("selinux_hide: fake status is not initialized after post-fs-data!\\n");
+          #endif
+              }''')
+          assert 'ksu_selinux_hide_status_open(filp)' in (root/'security/selinux/selinuxfs.c').read_text()
+          assert 'filp->private_data = page; /* struct page*' in (k/'feature/selinux_hide.c').read_text()
+          print('Compiled-in SELinux status hook installed for SUSFS 2.0.0')
           PY
 
       - name: Instrument and validate KSU root authorization (read-only)
