@@ -514,7 +514,7 @@ jobs:
           if '#include <linux/atomic.h>' not in text:
               text = '#include <linux/atomic.h>\n' + text
           needle = 'bool susfs_is_inode_sus_path(struct inode *inode) {'
-          assert text.count(needle) == 1, ('sus_path kernel-6.1 function', text.count(needle))
+          assert text.count(needle) in (1, 2), ('sus_path kernel-6.1 function', text.count(needle))
           insert = '''bool susfs_is_inode_sus_path(struct inode *inode) {
               static atomic_t diag_tagged = ATOMIC_INIT(0);
               static atomic_t diag_untagged = ATOMIC_INIT(0);
@@ -526,7 +526,8 @@ jobs:
                           inode->i_ino, tagged, susfs_is_current_proc_umounted(),
                           inode->i_uid.val);
           '''.replace('              ', '    ')
-          text = text.replace(needle, insert)
+          # Kernel 6.1 uses the first struct-inode overload (5.15+); the other belongs to older kernels.
+          text = text.replace(needle, insert, 1)
           path.write_text(text)
 
           # Make diagnostic builds unmistakable and fail early on missing hooks.
