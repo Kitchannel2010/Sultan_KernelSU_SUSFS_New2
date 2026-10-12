@@ -3,7 +3,7 @@ name: Experimental Sultan zuma KSU sucompat and SELinux status fixes
 on:
   workflow_dispatch:
   push:
-    branches: [ksun-upgrade, ksun-sucompat-postboot-fix, ksun-selinux-hide-status-fix]
+    branches: [ksun-upgrade, ksun-sucompat-postboot-fix, ksun-selinux-hide-status-fix, ksun-susfs-diagnostic]
     paths: [.github/workflows/build-ksun-zuma-test.yml]
 
 permissions:
@@ -433,6 +433,106 @@ jobs:
                       return 0;''')
           replace(k/'supercall/dispatch.c', 'ret = 1; // SUSFS v2.0.0 does not provide per-process no_su flags', 'ret = susfs_is_current_proc_umounted() ? 0 : 1; // SUSFS 2.0 hook gate')
           print('Adapted KSU Next to SUSFS 2.0.0 hook ABI and lifecycle')
+          PY
+
+      - name: Instrument SUSFS per-app diagnostic for UID 10527
+        run: |
+          set -euo pipefail
+          python3 - "$CONFIG" <<'PY'
+          from pathlib import Path
+          import sys
+          root = Path(sys.argv[1])
+          ksu = root / 'KernelSU-Next/kernel'
+          target_uid = 10527
+
+          def replace_one(path, old, new):
+              text = path.read_text()
+              assert text.count(old) == 1, (str(path), old, text.count(old))
+              path.write_text(text.replace(old, new))
+
+          # Observe Zygote decisions. Do not change Root/SUSFS semantics.
+          path = ksu / 'hook/setuid_hook.c'
+          replace_one(path,
+              '    uid_t cur_uid = current_uid().val;\n\n    if (cur_uid != 0)',
+              '''    uid_t cur_uid = current_uid().val;
+
+              if (ruid == 10527)
+                  pr_warn("KSUN_DIAG: setresuid target=%u current=%u zygote=%d next=%d want_umount=%d was_umounted=%d\\n",
+                      ruid, cur_uid,
+                      susfs_is_sid_equal(current_cred(), susfs_zygote_sid),
+                      susfs_is_sid_equal(current_cred(), susfs_zygote_next_sid),
+                      ksu_uid_should_umount(ruid), susfs_is_current_proc_umounted());
+
+              if (cur_uid != 0)'''.replace('              ', '    '))
+          replace_one(path,
+              '''    if (susfs_is_sid_equal(current_cred(), susfs_zygote_sid))
+                  return handle_zygote_setresuid(ruid);
+
+              if (susfs_is_sid_equal(current_cred(), susfs_zygote_next_sid))
+                  return handle_zygote_next_setresuid(ruid);
+
+              return 0;'''.replace('              ', '    '),
+              '''    if (susfs_is_sid_equal(current_cred(), susfs_zygote_sid)) {
+                  int ret = handle_zygote_setresuid(ruid);
+                  if (ruid == 10527)
+                      pr_warn("KSUN_DIAG: finished zygote ret=%d umounted=%d\\n",
+                              ret, susfs_is_current_proc_umounted());
+                  return ret;
+              }
+
+              if (susfs_is_sid_equal(current_cred(), susfs_zygote_next_sid)) {
+                  int ret = handle_zygote_next_setresuid(ruid);
+                  if (ruid == 10527)
+                      pr_warn("KSUN_DIAG: finished zygote_next ret=%d umounted=%d\\n",
+                              ret, susfs_is_current_proc_umounted());
+                  return ret;
+              }
+
+              if (ruid == 10527)
+                  pr_warn("KSUN_DIAG: unmatched zygote SID for uid=%u\\n", ruid);
+              return 0;'''.replace('              ', '    '))
+
+          # Record the App Profile decision for just Duck Detector.
+          path = ksu / 'policy/allowlist.c'
+          replace_one(path,
+              '''    rcu_read_unlock();
+
+              if (profile)
+                  ksu_put_app_profile(profile);'''.replace('              ', '    '),
+              '''    if (uid == 10527)
+                  pr_warn("KSUN_DIAG: profile uid=%u umount=%d found=%d allow_su=%d use_default=%d\\n",
+                          uid, res, !!profile, profile ? profile->allow_su : 0,
+                          profile ? profile->nrp_config.use_default : 1);
+              rcu_read_unlock();
+
+              if (profile)
+                  ksu_put_app_profile(profile);'''.replace('              ', '    '))
+
+          # Observe inode checks (first 20 tagged + first 8 other per boot).
+          path = root / 'fs/susfs.c'
+          text = path.read_text()
+          if '#include <linux/atomic.h>' not in text:
+              text = '#include <linux/atomic.h>\n' + text
+          needle = 'bool susfs_is_inode_sus_path(struct inode *inode) {'
+          assert text.count(needle) == 1, ('sus_path kernel-6.1 function', text.count(needle))
+          insert = '''bool susfs_is_inode_sus_path(struct inode *inode) {
+              static atomic_t diag_tagged = ATOMIC_INIT(0);
+              static atomic_t diag_untagged = ATOMIC_INIT(0);
+              bool tagged = !!(inode->i_mapping->flags & BIT_SUS_PATH);
+              if (current_uid().val == 10527 &&
+                  atomic_inc_return(tagged ? &diag_tagged : &diag_untagged) <=
+                      (tagged ? 20 : 8))
+                  pr_warn("KSUN_DIAG: sus_path ino=%lu marked=%d umounted=%d owner=%u\\n",
+                          inode->i_ino, tagged, susfs_is_current_proc_umounted(),
+                          inode->i_uid.val);
+          '''.replace('              ', '    ')
+          text = text.replace(needle, insert)
+          path.write_text(text)
+
+          # Make diagnostic builds unmistakable and fail early on missing hooks.
+          assert 'KSUN_DIAG: setresuid' in (ksu / 'hook/setuid_hook.c').read_text()
+          assert 'KSUN_DIAG: sus_path' in (root / 'fs/susfs.c').read_text()
+          print('KSUN_DIAG: instrumented UID 10527 without modifying SUSFS decisions')
           PY
 
       - name: Integrate SELinux status hide without kallsyms rodata lookup
