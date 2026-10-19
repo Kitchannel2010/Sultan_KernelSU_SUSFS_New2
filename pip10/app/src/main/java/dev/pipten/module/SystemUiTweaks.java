@@ -1,9 +1,9 @@
 package dev.pipten.module;
 
 import android.app.RemoteAction;
+import android.graphics.drawable.Drawable;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.ImageView;
 import java.util.List;
 import java.util.Map;
 import java.util.WeakHashMap;
@@ -12,107 +12,100 @@ import de.robv.android.xposed.XposedBridge;
 import de.robv.android.xposed.XposedHelpers;
 
 /**
- * Optional SystemUI-only hook. Enlarges ONLY the artwork within PiP10's
- * own action views from the AOSP default 20dp to 36dp. Tap targets stay 48dp.
- * If the ROM uses different class names, this hook quietly does nothing.
+ * A custom-drawn control layer inside stock PiP action views.
+ *
+ * No resizing of framework ImageViews or changing ViewGroup children (which
+ * would break AOSP's casts to PipMenuActionView during subsequent updates).
+ * We draw our own entire 48dp surface on top using View.setForeground().
+ * Original PendingIntents/touch targets remain owned by SystemUI.
+ *
+ * Only acts on PiP10's own 3 actions; other PiP clients are untouched.
  */
 final class SystemUiTweaks {
     private static final String TAG = "PiP10";
-    private static final Map<ImageView, int[]> ORIGINAL = new WeakHashMap<>();
-    private static boolean resizeLogged = false;
+    private static final Map<View, Drawable> ORIGINAL = new WeakHashMap<>();
+    private static boolean installedLogShown, paintedLogShown;
+    private static boolean missingFieldsShown;
 
     private SystemUiTweaks() {}
 
     static void install(ClassLoader loader) {
-        String[] candidates = {
+        String[] names = {
             "com.android.wm.shell.pip.phone.PipMenuView",
-            "com.android.wm.shell.pip2.phone.PipMenuView"
+            "com.android.wm.shell.pip2.phone.PipMenuView",
+            "com.android.systemui.pip.phone.PipMenuActivity"
         };
-        int installed = 0;
-        for (String name : candidates) {
+        int count = 0;
+        for (String name : names) {
             try {
-                Class<?> clazz = XposedHelpers.findClassIfExists(name, loader);
-                if (clazz == null) continue;
-                installed += XposedBridge.hookAllMethods(clazz, "updateActionViews",
-                    new XC_MethodHook() {
-                        @Override protected void afterHookedMethod(MethodHookParam p) {
-                            try { adjust(p.thisObject); }
-                            catch (Throwable t) {
-                                XposedBridge.log(TAG + " optional UI resize failed: " + t);
-                            }
+                Class<?> target = XposedHelpers.findClassIfExists(name, loader);
+                if (target == null) continue;
+                count += XposedBridge.hookAllMethods(target, "updateActionViews",
+                        new XC_MethodHook() {
+                    @Override protected void afterHookedMethod(MethodHookParam p) {
+                        try { paintControls(p.thisObject); }
+                        catch (Throwable t) {
+                            XposedBridge.log(TAG + " custom controls failed: " + t);
                         }
-                    }).size();
-            } catch (Throwable t) {
-                XposedBridge.log(TAG + " cannot hook " + name + ": " + t);
-            }
-        }
-        XposedBridge.log(TAG + " optional SystemUI hooks installed=" + installed);
-    }
-
-    private static void adjust(Object pipMenu) {
-        Object group = XposedHelpers.getObjectField(pipMenu, "mActionsGroup");
-        Object actions = XposedHelpers.getObjectField(pipMenu, "mActions");
-        if (!(group instanceof ViewGroup)) return;
-        ViewGroup row = (ViewGroup) group;
-        boolean ours = false;
-        if (actions instanceof List) {
-            for (Object item : (List<?>) actions) {
-                if (item instanceof RemoteAction &&
-                    PipActions.BACK_LABEL.contentEquals(((RemoteAction) item).getTitle())) {
-                    ours = true; break;
-                }
-            }
-        }
-        for (int i = 0; i < row.getChildCount(); i++) {
-            View v = row.getChildAt(i);
-            ImageView icon = findIcon(v);
-            if (icon == null) continue;
-            int[] saved = ORIGINAL.get(icon);
-            ViewGroup.LayoutParams lp = icon.getLayoutParams();
-            if (lp == null) continue;
-            if (ours && i < 3 && v.getVisibility() == View.VISIBLE) {
-                if (saved == null) {
-                    ORIGINAL.put(icon, new int[] {lp.width, lp.height});
-                }
-                int pixels = Math.round(icon.getResources().getDisplayMetrics().density * 36f);
-                if (lp.width != pixels || lp.height != pixels) {
-                    lp.width = pixels;
-                    lp.height = pixels;
-                    icon.setLayoutParams(lp);
-                    if (!resizeLogged) {
-                        resizeLogged = true;
-                        XposedBridge.log(TAG + " resized PiP10 icon to 36dp; touch target unchanged");
                     }
+                }).size();
+                XposedBridge.log(TAG + " found menu class " + name);
+            } catch (Throwable t) {
+                XposedBridge.log(TAG + " cannot install menu hook " + name + ": " + t);
+            }
+        }
+        XposedBridge.log(TAG + " custom controls installed hooks=" + count);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void paintControls(Object menu) {
+        Object groupObj;
+        Object actionsObj;
+        try {
+            groupObj = XposedHelpers.getObjectField(menu, "mActionsGroup");
+            actionsObj = XposedHelpers.getObjectField(menu, "mActions");
+        } catch (Throwable t) {
+            if (!missingFieldsShown) {
+                missingFieldsShown = true;
+                XposedBridge.log(TAG + " PiP menu action fields unavailable: " + t);
+            }
+            return;
+        }
+        if (!(groupObj instanceof ViewGroup) || !(actionsObj instanceof List)) return;
+        ViewGroup actionsGroup = (ViewGroup) groupObj;
+        List<?> actions = (List<?>) actionsObj;
+        boolean matching = actions.size() == 3 &&
+                isAction(actions.get(0), PipActions.BACK_LABEL) &&
+                isAction(actions.get(2), PipActions.FORWARD_LABEL);
+        for (int i = 0; i < actionsGroup.getChildCount(); i++) {
+            View target = actionsGroup.getChildAt(i);
+            if (matching && i < 3 && target.getVisibility() == View.VISIBLE) {
+                int kind;
+                if (i == 0) kind = CustomPipGlyph.BACK;
+                else if (i == 2) kind = CustomPipGlyph.FORWARD;
+                else if (actions.get(1) instanceof RemoteAction &&
+                        ((RemoteAction) actions.get(1)).getTitle().toString().contains("Pause"))
+                    kind = CustomPipGlyph.PAUSE;
+                else kind = CustomPipGlyph.PLAY;
+
+                Drawable existing = target.getForeground();
+                if (existing instanceof CustomPipGlyph &&
+                        ((CustomPipGlyph) existing).controlType() == kind) continue;
+                if (!ORIGINAL.containsKey(target))
+                    ORIGINAL.put(target, existing);
+                target.setForeground(new CustomPipGlyph(kind));
+                if (!paintedLogShown) {
+                    paintedLogShown = true;
+                    XposedBridge.log(TAG + " custom 48dp PiP10 controls painted successfully");
                 }
-            } else if (saved != null) {
-                if (lp.width != saved[0] || lp.height != saved[1]) {
-                    lp.width = saved[0];
-                    lp.height = saved[1];
-                    icon.setLayoutParams(lp);
-                }
-                ORIGINAL.remove(icon);
+            } else if (ORIGINAL.containsKey(target)) {
+                target.setForeground(ORIGINAL.remove(target));
             }
         }
     }
 
-    private static ImageView findIcon(View view) {
-        if (view == null) return null;
-        // On AOSP PipMenuActionView is a FrameLayout with TWO ImageViews:
-        // mCustomCloseBackground (first, often GONE) and mImageView.
-        // v0.3 erroneously enlarged the first ImageView, not the actual glyph.
-        try {
-            Object actual = XposedHelpers.getObjectField(view, "mImageView");
-            if (actual instanceof ImageView) return (ImageView) actual;
-        } catch (Throwable ignored) {}
-        if (view instanceof ImageView) return (ImageView) view;
-        if (!(view instanceof ViewGroup)) return null;
-        ViewGroup group = (ViewGroup) view;
-        for (int i = group.getChildCount() - 1; i >= 0; i--) {
-            View child = group.getChildAt(i);
-            if (child.getVisibility() != View.VISIBLE) continue;
-            ImageView found = findIcon(child);
-            if (found != null) return found;
-        }
-        return null;
+    private static boolean isAction(Object obj, String title) {
+        return obj instanceof RemoteAction &&
+                title.contentEquals(((RemoteAction) obj).getTitle());
     }
 }

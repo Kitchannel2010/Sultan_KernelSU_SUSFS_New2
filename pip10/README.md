@@ -1,28 +1,37 @@
-# PiP10 LSPosed v0.3.1-alpha
+# PiP10 v0.4.0-alpha — custom-painted PiP controls
 
-v0.3.1: Stop refreshing PiP on each MediaSession position update; only refresh
-when playback changes between playing and paused. SystemUI icon resize now
-selects the **actual `mImageView`**, not the preceding custom close background,
-and grows the artwork to 36dp (within the original 48dp hitbox).
-Actual Seek responsiveness still depends on the YouTube player and buffering.
+This version **renders the control appearance from scratch**, rather than
+asking Android's built-in ImageView to display oversized vector icons.
 
-To enable artwork enlargement, scope **both YouTube and SystemUI**, then reboot.
-Never enable the SystemUI scope without being ready to disable it if the UI becomes unstable.
+- Left: translucent 48dp circle, counterclockwise 10-second arrow.
+- Middle: 48dp play/pause with the host playback state.
+- Right: clockwise 10-second arrow.
+- Uses the *existing* SystemUI action view & already-functional PendingIntents,
+  preserving native window management and touch input.
+- Does **not** replace the video content, which is rendered by Android PiP.
+- Without the SystemUI hook, normal native-sized controls remain available.
 
+## Required LSPosed scope
+Tick BOTH:
+- `com.google.android.youtube` or `app.revanced.android.youtube`
+- `com.android.systemui`
+Then reboot. Install over v0.3.1 (same package name and debug signing for builds
+from same project; if signatures differ Android may require uninstall).
 
+## How to check the hook
+```shell
+adb logcat -d | grep -i 'PiP10'
+```
+In LSPosed logs, look for:
+- `custom controls installed hooks=1` (or more): found SystemUI class
+- `custom 48dp PiP10 controls painted successfully`: actually displayed
+If `hooks=0`, the Pixel's ROM uses a different PiP menu implementation;
+do not assume the enlarged appearance works.
 
-**Corrected the three PiP controls:** -10s, Play/Pause (no borrowed headphones/media routing action), +10s.
-Refreshes icons after host MediaSession playback-state updates.
+## Safety
+This is a device-untested debug APK. Injecting SystemUI can affect its stability.
+If it crashes, disable SystemUI scope from LSPosed or boot into safe mode. It
+never flashes system partitions or touches the original kernel branches.
 
-**Optional SystemUI artwork enlargement:** enable `com.android.systemui` in LSPosed scope and reboot. The module attempts to find AOSP `PipMenuView.updateActionViews`, enlarging PiP10 artwork from the default 20dp to 32dp, while leaving hitboxes unchanged. Not enabled until explicitly selected. If a ROM does not contain the target class, nothing is enlarged. This is an experimental system process hook; if SystemUI becomes unstable, disable its LSPosed scope.
-
-No Notification Access permission is necessary (removed the v0.1 cross-app approach).
-Required app scope: `com.google.android.youtube` or `app.revanced.android.youtube`.
-Install APK over v0.2, force stop YouTube and reboot before testing.
-
-To diagnose controls: `adb logcat -d -s PiP10:I`.
-- "In-process control receiver registered": buttons have a receiver.
-- "PiP action clicked": PendingIntent was delivered.
-- "No active in-process MediaSession": YouTube playback requires a different session control path.
-
-Only the independent pip10-build branch in the user's kernel repository is modified. This artifact is a debug-signed, device-untested alpha.
+PiP ±10-second seek still uses the v0.3.1 in-process MediaSession bridge.
+Look for `dispatchMs=` in logcat to understand command dispatch speed.
