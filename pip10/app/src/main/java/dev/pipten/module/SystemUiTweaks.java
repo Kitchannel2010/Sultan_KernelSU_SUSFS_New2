@@ -4,7 +4,6 @@ import android.app.RemoteAction;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ImageView;
-import android.widget.FrameLayout;
 import java.util.List;
 import java.util.Map;
 import java.util.WeakHashMap;
@@ -14,12 +13,13 @@ import de.robv.android.xposed.XposedHelpers;
 
 /**
  * Optional SystemUI-only hook. Enlarges ONLY the artwork within PiP10's
- * own action views from the AOSP default 20dp to 32dp. Tap targets stay 48dp.
+ * own action views from the AOSP default 20dp to 36dp. Tap targets stay 48dp.
  * If the ROM uses different class names, this hook quietly does nothing.
  */
 final class SystemUiTweaks {
     private static final String TAG = "PiP10";
     private static final Map<ImageView, int[]> ORIGINAL = new WeakHashMap<>();
+    private static boolean resizeLogged = false;
 
     private SystemUiTweaks() {}
 
@@ -74,11 +74,15 @@ final class SystemUiTweaks {
                 if (saved == null) {
                     ORIGINAL.put(icon, new int[] {lp.width, lp.height});
                 }
-                int pixels = Math.round(icon.getResources().getDisplayMetrics().density * 32f);
+                int pixels = Math.round(icon.getResources().getDisplayMetrics().density * 36f);
                 if (lp.width != pixels || lp.height != pixels) {
                     lp.width = pixels;
                     lp.height = pixels;
                     icon.setLayoutParams(lp);
+                    if (!resizeLogged) {
+                        resizeLogged = true;
+                        XposedBridge.log(TAG + " resized PiP10 icon to 36dp; touch target unchanged");
+                    }
                 }
             } else if (saved != null) {
                 if (lp.width != saved[0] || lp.height != saved[1]) {
@@ -93,11 +97,20 @@ final class SystemUiTweaks {
 
     private static ImageView findIcon(View view) {
         if (view == null) return null;
+        // On AOSP PipMenuActionView is a FrameLayout with TWO ImageViews:
+        // mCustomCloseBackground (first, often GONE) and mImageView.
+        // v0.3 erroneously enlarged the first ImageView, not the actual glyph.
+        try {
+            Object actual = XposedHelpers.getObjectField(view, "mImageView");
+            if (actual instanceof ImageView) return (ImageView) actual;
+        } catch (Throwable ignored) {}
         if (view instanceof ImageView) return (ImageView) view;
         if (!(view instanceof ViewGroup)) return null;
         ViewGroup group = (ViewGroup) view;
-        for (int i = 0; i < group.getChildCount(); i++) {
-            ImageView found = findIcon(group.getChildAt(i));
+        for (int i = group.getChildCount() - 1; i >= 0; i--) {
+            View child = group.getChildAt(i);
+            if (child.getVisibility() != View.VISIBLE) continue;
+            ImageView found = findIcon(child);
             if (found != null) return found;
         }
         return null;

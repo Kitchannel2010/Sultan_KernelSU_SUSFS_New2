@@ -157,8 +157,11 @@ final class HostPlaybackBridge {
             lastSeekSession = new WeakReference<>(session);
             lastSeekPosition = dest;
             lastSeekTime = now;
+            long dispatchStart = SystemClock.elapsedRealtime();
             controls.seekTo(dest);
+            long dispatchMs = SystemClock.elapsedRealtime() - dispatchStart;
             Log.i(TAG, "Host session seekTo " + dest + " from " + pos +
+                " dispatchMs=" + dispatchMs +
                 " actions=" + p.getActions());
             if ((p.getActions() & PlaybackState.ACTION_SEEK_TO) == 0)
                 Log.w(TAG, "Seek requested but MediaSession does not advertise ACTION_SEEK_TO");

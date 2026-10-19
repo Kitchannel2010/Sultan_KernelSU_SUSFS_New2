@@ -1,4 +1,15 @@
-# PiP10 LSPosed v0.3.0-alpha
+# PiP10 LSPosed v0.3.1-alpha
+
+v0.3.1: Stop refreshing PiP on each MediaSession position update; only refresh
+when playback changes between playing and paused. SystemUI icon resize now
+selects the **actual `mImageView`**, not the preceding custom close background,
+and grows the artwork to 36dp (within the original 48dp hitbox).
+Actual Seek responsiveness still depends on the YouTube player and buffering.
+
+To enable artwork enlargement, scope **both YouTube and SystemUI**, then reboot.
+Never enable the SystemUI scope without being ready to disable it if the UI becomes unstable.
+
+
 
 **Corrected the three PiP controls:** -10s, Play/Pause (no borrowed headphones/media routing action), +10s.
 Refreshes icons after host MediaSession playback-state updates.

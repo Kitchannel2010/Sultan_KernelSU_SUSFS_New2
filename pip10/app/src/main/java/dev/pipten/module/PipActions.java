@@ -7,7 +7,6 @@ import android.content.Context;
 import android.graphics.drawable.Icon;
 import android.os.Handler;
 import android.os.Looper;
-import android.os.SystemClock;
 import java.lang.ref.WeakReference;
 import java.util.Arrays;
 
@@ -18,7 +17,7 @@ final class PipActions {
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
     private static WeakReference<Activity> lastActivity = new WeakReference<>(null);
     private static PictureInPictureParams lastParams;
-    private static long lastRefresh;
+    private static volatile Boolean lastRenderedPlaying;
     private static boolean refreshQueued;
 
     private PipActions() {}
@@ -26,11 +25,12 @@ final class PipActions {
     static PictureInPictureParams inject(Context host, PictureInPictureParams original) {
         if (host == null || original == null) return original;
         if (!HostPlaybackBridge.ensureReceiver(host)) return original;
+        boolean playing = HostPlaybackBridge.isPlaying();
         if (host instanceof Activity) {
             lastActivity = new WeakReference<>((Activity) host);
             lastParams = original;
+            lastRenderedPlaying = playing;
         }
-        boolean playing = HostPlaybackBridge.isPlaying();
         RemoteAction back = make(host, -1, R.drawable.ic_back, BACK_LABEL);
         RemoteAction center = make(host, 0,
                 playing ? R.drawable.ic_pause : R.drawable.ic_toggle,
@@ -41,6 +41,10 @@ final class PipActions {
     }
 
     static void requestRefresh() {
+        // MediaSession.setPlaybackState() also updates video position frequently.
+        // Never rebuild PiP actions just because playback position has changed.
+        Boolean rendered = lastRenderedPlaying;
+        if (rendered == null || rendered == HostPlaybackBridge.isPlaying()) return;
         synchronized (PipActions.class) {
             if (refreshQueued) return;
             refreshQueued = true;
@@ -51,10 +55,11 @@ final class PipActions {
             PictureInPictureParams old = lastParams;
             if (a == null || old == null || a.isFinishing() || a.isDestroyed()
                     || !a.isInPictureInPictureMode()) return;
+            if (lastRenderedPlaying == HostPlaybackBridge.isPlaying()) return;
             try {
                 a.setPictureInPictureParams(old);
             } catch (Throwable ignored) {}
-        }, 350);
+        }, 150);
     }
 
     private static RemoteAction make(Context ctx, int direction, int icon, String label) {
