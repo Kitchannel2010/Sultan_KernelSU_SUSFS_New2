@@ -104,6 +104,17 @@ final class HostPlaybackBridge {
         return fallback;
     }
 
+    static boolean isPlaying() {
+        try {
+            MediaSession session = findSession();
+            if (session == null) return false;
+            PlaybackState state = session.getController().getPlaybackState();
+            return state != null && state.getState() == PlaybackState.STATE_PLAYING;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
     private static void perform(Context ctx, int dir) {
         try {
             MediaSession session = findSession();
