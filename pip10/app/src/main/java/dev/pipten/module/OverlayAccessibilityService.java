@@ -13,7 +13,10 @@ import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityWindowInfo;
 import java.util.List;
 
-/** A small transparent accessibility overlay centered inside system PiP. */
+/**
+ * A narrow transparent accessibility window that follows Android PiP.
+ * The single-piece dark frosted card is painted by ControlStrip.
+ */
 public final class OverlayAccessibilityService extends AccessibilityService {
     private static final String TAG = "PiP10";
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -50,9 +53,9 @@ public final class OverlayAccessibilityService extends AccessibilityService {
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
                 PixelFormat.TRANSLUCENT);
         params.gravity = Gravity.TOP | Gravity.LEFT;
-        params.setTitle("PiP10 Liquid Glass media controls");
+        params.setTitle("PiP10 Frosted Media Controls");
         handler.post(poll);
-        Log.i(TAG, "Liquid Glass overlay connected");
+        Log.i(TAG, "PiP10 frosted overlay connected");
     }
 
     @Override public void onAccessibilityEvent(AccessibilityEvent e) {
@@ -60,7 +63,6 @@ public final class OverlayAccessibilityService extends AccessibilityService {
                 e.getEventType() == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED))
             handler.post(this::updateOverlay);
     }
-
     @Override public void onInterrupt() {}
 
     private void updateOverlay() {
@@ -70,13 +72,11 @@ public final class OverlayAccessibilityService extends AccessibilityService {
             removeOverlay();
             return;
         }
-
-        // A transparent, narrow overlay: unlike v0.5 it NEVER intercepts the
-        // full width of the PiP, so taps and subtitles around it remain visible.
-        int width = Math.min(dp(260), pip.width() - dp(22));
-        int height = Math.min(dp(70), Math.max(dp(54), pip.height() / 3));
+        // Compact card (not a full-width video scrim).
+        int width = Math.min(dp(285), pip.width() - dp(24));
+        int height = Math.min(dp(75), Math.max(dp(58), pip.height() / 3));
         int x = pip.left + (pip.width() - width) / 2;
-        int y = pip.bottom - height - dp(5);
+        int y = pip.bottom - height - dp(9);
         controls.updatePlayState(MediaBridge.isPlaying(this));
 
         if (attached && previous.left == x && previous.top == y &&
@@ -90,11 +90,11 @@ public final class OverlayAccessibilityService extends AccessibilityService {
             else {
                 manager.addView(controls, params);
                 attached = true;
-                Log.i(TAG, "Compact glass controls attached " + pip.toShortString());
+                Log.i(TAG, "Flat glass controls attached " + pip.toShortString());
             }
             previous.set(x, y, width, height);
         } catch (Throwable t) {
-            Log.e(TAG, "Glass overlay layout failed", t);
+            Log.e(TAG, "Overlay update failed", t);
             removeOverlay();
         }
     }
@@ -103,12 +103,12 @@ public final class OverlayAccessibilityService extends AccessibilityService {
         List<AccessibilityWindowInfo> windows = getWindows();
         if (windows == null) return null;
         Rect selected = null;
-        for (AccessibilityWindowInfo window : windows) {
-            if (window == null || !window.isInPictureInPictureMode()) continue;
+        for (AccessibilityWindowInfo w : windows) {
+            if (w == null || !w.isInPictureInPictureMode()) continue;
             Rect bounds = new Rect();
-            window.getBoundsInScreen(bounds);
-            if (bounds.isEmpty()) continue;
-            if (selected == null || bounds.width() > selected.width())
+            w.getBoundsInScreen(bounds);
+            if (!bounds.isEmpty() &&
+                    (selected == null || bounds.width() > selected.width()))
                 selected = bounds;
         }
         return selected;
@@ -121,7 +121,7 @@ public final class OverlayAccessibilityService extends AccessibilityService {
     private void removeOverlay() {
         if (!attached) return;
         try { manager.removeViewImmediate(controls); }
-        catch (Throwable t) { Log.w(TAG, "Overlay removal failed", t); }
+        catch (Throwable t) { Log.w(TAG, "Remove overlay failed", t); }
         attached = false;
         previous.setEmpty();
     }

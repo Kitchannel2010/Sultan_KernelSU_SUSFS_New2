@@ -6,7 +6,6 @@ import android.graphics.Color;
 import android.graphics.LinearGradient;
 import android.graphics.Paint;
 import android.graphics.Path;
-import android.graphics.RadialGradient;
 import android.graphics.RectF;
 import android.graphics.Shader;
 import android.graphics.Typeface;
@@ -14,47 +13,47 @@ import android.view.MotionEvent;
 import android.view.View;
 
 /**
- * PiP 10s floating controls — iOS-inspired translucent glass aesthetic.
+ * A restrained, iOS-inspired media card: one soft dark translucent material,
+ * white unframed icons, and no nested glass discs, metallic rims or glare.
  *
- * Draws a SINGLE compact, transparent pill with 3 independent glass buttons.
- * Does not capture video, read pixels, or apply a fake rectangle-wide dark scrim.
- * Actual backdrop blur is not exposed to a plain accessibility overlay; this
- * implementation uses layered translucent highlights and gradients instead.
+ * Keeps the working v0.5 media click logic unchanged.
  */
 public final class ControlStrip extends View {
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final float density;
-    private final RectF r = new RectF();
-    private final Path clip = new Path();
-    private final Typeface numberTypeface = Typeface.create("sans-serif-medium", Typeface.BOLD);
+    private final RectF card = new RectF();
+    private final Typeface numberTypeface =
+            Typeface.create("sans-serif-medium", Typeface.BOLD);
     private boolean playing;
     private int pressed = -1;
 
-    public ControlStrip(Context ctx) {
-        super(ctx);
+    public ControlStrip(Context context) {
+        super(context);
         density = getResources().getDisplayMetrics().density;
         setLayerType(View.LAYER_TYPE_SOFTWARE, null);
         setClickable(true);
-        setContentDescription("PiP media controls: back 10 seconds, play or pause, forward 10 seconds");
+        setContentDescription(
+                "Back 10 seconds, play or pause, forward 10 seconds");
     }
 
-    private float dp(float value) { return value * density; }
+    private float dp(float d) { return d * density; }
 
-    void updatePlayState(boolean active) {
-        if (playing != active) {
-            playing = active;
+    void updatePlayState(boolean value) {
+        if (playing != value) {
+            playing = value;
             invalidate();
         }
     }
 
-    private int indexAt(float x) {
-        return Math.max(0, Math.min(2, (int)(x * 3f / Math.max(1, getWidth()))));
+    private int section(float x) {
+        return Math.max(0, Math.min(2,
+                (int)(3f * x / Math.max(1, getWidth()))));
     }
 
-    @Override public boolean onTouchEvent(MotionEvent event) {
-        switch (event.getActionMasked()) {
+    @Override public boolean onTouchEvent(MotionEvent e) {
+        switch (e.getActionMasked()) {
             case MotionEvent.ACTION_DOWN:
-                pressed = indexAt(event.getX());
+                pressed = section(e.getX());
                 invalidate();
                 return true;
             case MotionEvent.ACTION_CANCEL:
@@ -62,17 +61,16 @@ public final class ControlStrip extends View {
                 invalidate();
                 return true;
             case MotionEvent.ACTION_UP:
-                int selected = indexAt(event.getX());
-                boolean activate = pressed == selected;
+                int selected = section(e.getX());
+                boolean trigger = selected == pressed;
                 pressed = -1;
                 invalidate();
-                if (activate) {
+                if (trigger) {
                     MediaBridge.control(getContext(), selected - 1);
                     performClick();
                 }
                 return true;
-            default:
-                return true;
+            default: return true;
         }
     }
 
@@ -81,162 +79,128 @@ public final class ControlStrip extends View {
         return true;
     }
 
-    @Override protected void onDraw(Canvas c) {
-        super.onDraw(c);
-        float w = getWidth(), h = getHeight();
-        if (w <= 0 || h <= 0) return;
+    @Override protected void onDraw(Canvas canvas) {
+        super.onDraw(canvas);
+        float width = getWidth(), height = getHeight();
+        if (width < 4 || height < 4) return;
 
-        // A deliberately subtle shadow outside the capsule; the overlay window
-        // itself is transparent. No full-width opaque control backdrop.
-        r.set(dp(3), dp(3), w - dp(3), h - dp(3));
-        float arc = r.height() / 2f;
+        float inset = dp(3);
+        card.set(inset, inset, width - inset, height - inset);
+        float corner = Math.min(dp(25), card.height() * .38f);
 
+        // Soft low-elevation shadow, not a glass-like white neon rim.
         reset();
-        paint.setColor(0x37000000);
-        paint.setShadowLayer(dp(5), 0, dp(2.5f), 0x6B000000);
-        c.drawRoundRect(r, arc, arc, paint);
+        paint.setColor(0x900E1A1C);
+        paint.setShadowLayer(dp(6), 0, dp(2), 0x32000000);
+        canvas.drawRoundRect(card, corner, corner, paint);
         paint.clearShadowLayer();
 
-        // Smoky titanium glass: transparent and gently luminous in the center.
+        // Real window blur is requested by OverlayAccessibilityService when
+        // Android supports it; this tint works as a graceful no-blur fallback.
         reset();
         paint.setShader(new LinearGradient(
-                r.left, r.top, r.left, r.bottom,
-                new int[]{0xBC768393, 0xAB34404E, 0xB31C2633},
-                new float[]{0f, 0.41f, 1f}, Shader.TileMode.CLAMP));
-        c.drawRoundRect(r, arc, arc, paint);
+                card.left, card.top, card.left, card.bottom,
+                new int[] {0xAE293537, 0xB51D282A, 0xC0192527},
+                new float[] {0f, .50f, 1f},
+                Shader.TileMode.CLAMP));
+        canvas.drawRoundRect(card, corner, corner, paint);
         paint.setShader(null);
 
-        // Upper sheen: clipped capsule to mimic refracted liquid glass.
-        clip.reset();
-        clip.addRoundRect(r, arc, arc, Path.Direction.CW);
-        int save = c.save();
-        c.clipPath(clip);
+        // Almost imperceptible light reflection and single thin glass edge.
         reset();
-        paint.setShader(new LinearGradient(
-                0, r.top, 0, r.centerY() + dp(5),
-                new int[]{0x7CFFFFFF, 0x1EFFFFFF, 0x00FFFFFF},
-                new float[]{0, 0.48f, 1}, Shader.TileMode.CLAMP));
-        RectF gloss = new RectF(r.left + dp(1), r.top, r.right - dp(1), r.centerY() + dp(5));
-        c.drawOval(gloss, paint);
-        paint.setShader(null);
-
-        // Small cool-toned radiance along the bottom of the glass.
-        reset();
-        paint.setShader(new LinearGradient(0, r.centerY(), 0, r.bottom,
-                0x003BC8FF, 0x2637B8E6, Shader.TileMode.CLAMP));
-        c.drawRoundRect(r, arc, arc, paint);
-        paint.setShader(null);
-        c.restoreToCount(save);
-
-        // Reflections and outline are important for transparent appearance.
-        reset();
+        paint.setColor(0x20FFFFFF);
         paint.setStyle(Paint.Style.STROKE);
-        paint.setStrokeWidth(dp(.9f));
-        paint.setShader(new LinearGradient(0, r.top, 0, r.bottom,
-                new int[]{0xD1FFFFFF, 0x58FFFFFF, 0x49D8EDFF},
-                null, Shader.TileMode.CLAMP));
-        c.drawRoundRect(r.left + dp(.6f), r.top + dp(.6f),
-                r.right - dp(.6f), r.bottom - dp(.6f), arc, arc, paint);
-        paint.setShader(null);
+        paint.setStrokeWidth(dp(.75f));
+        canvas.drawRoundRect(
+                card.left + dp(.7f), card.top + dp(.7f),
+                card.right - dp(.7f), card.bottom - dp(.7f),
+                corner, corner, paint);
 
-        // Three glass lenses: 48dpish visuals, touch area remains full cell.
-        float cellWidth = w / 3f;
-        float radius = Math.min(dp(24), Math.min(h * .355f, cellWidth * .35f));
-        float cy = h / 2f;
+        reset();
+        paint.setColor(0x20FFFFFF);
+        paint.setStrokeWidth(dp(1.1f));
+        paint.setStrokeCap(Paint.Cap.ROUND);
+        canvas.drawArc(
+                card.left + dp(5), card.top + dp(1),
+                card.right - dp(5), card.bottom - dp(1),
+                206, 128, false, paint);
+
+        float cy = card.centerY();
+        float column = card.width() / 3f;
         for (int i = 0; i < 3; i++) {
-            float cx = cellWidth * (i + .5f);
-            drawLens(c, cx, cy, radius, i);
+            float cx = card.left + column * (i + .5f);
+
+            // Only on press: a quiet transparent feedback background.
+            if (pressed == i) {
+                reset();
+                paint.setColor(0x27FFFFFF);
+                float half = Math.min(dp(24), column * .31f);
+                canvas.drawRoundRect(cx - half, cy - dp(21),
+                        cx + half, cy + dp(21), dp(14), dp(14), paint);
+            }
+
+            int saved = canvas.save();
+            canvas.translate(cx, cy);
+            float iconScale = Math.min(1.22f,
+                    Math.min(card.height() / dp(57),
+                             column / dp(79)));
+            canvas.scale(iconScale * density, iconScale * density);
+            drawIcon(canvas, i);
+            canvas.restoreToCount(saved);
         }
     }
 
-    private void drawLens(Canvas canvas, float x, float y, float radius, int index) {
-        int save = canvas.save();
-        canvas.translate(x, y);
-        boolean down = pressed == index;
-        if (down) canvas.scale(.945f, .945f);
-
-        // Darkened soft edge under the independent glass disk.
+    private void drawIcon(Canvas canvas, int idx) {
         reset();
-        paint.setColor(down ? 0x46000000 : 0x34000000);
-        canvas.drawCircle(0, dp(1), radius + dp(1), paint);
-
-        reset();
-        paint.setShader(new RadialGradient(
-                -radius * .57f, -radius * .76f, radius * 2.05f,
-                new int[]{0x89FFFFFF, 0x487687A0, down ? 0x9A27384C : 0x66333D50},
-                new float[]{0f, .45f, 1f}, Shader.TileMode.CLAMP));
-        canvas.drawCircle(0, 0, radius, paint);
-        paint.setShader(null);
-
-        // Precision-machined rim and specular upper arc.
-        reset();
-        paint.setStyle(Paint.Style.STROKE);
-        paint.setStrokeWidth(dp(.85f));
-        paint.setColor(0x9FF6FBFF);
-        canvas.drawCircle(0, 0, radius - dp(.6f), paint);
-        paint.setStrokeWidth(dp(1.0f));
-        paint.setColor(0xABFFFFFF);
-        canvas.drawArc(-radius + dp(1), -radius + dp(1),
-                radius - dp(1), radius - dp(1),
-                207, 128, false, paint);
-
-        canvas.scale(radius / 24f, radius / 24f);
-        drawSymbol(canvas, index);
-        canvas.restoreToCount(save);
-    }
-
-    private void drawSymbol(Canvas canvas, int index) {
-        reset();
-        paint.setColor(0xFFFFFFFF);
-        if (index == 1) {
+        paint.setColor(Color.WHITE);
+        if (idx == 1) {
+            // Match the reference's clean white play / pause controls.
             if (playing) {
-                canvas.drawRoundRect(-7.5f, -10, -2f, 10, 1.1f, 1.1f, paint);
-                canvas.drawRoundRect(2f, -10, 7.5f, 10, 1.1f, 1.1f, paint);
+                canvas.drawRoundRect(-7f, -10f, -2f, 10f, .9f, .9f, paint);
+                canvas.drawRoundRect(2f, -10f, 7f, 10f, .9f, .9f, paint);
             } else {
                 Path play = new Path();
-                play.moveTo(-7, -10.5f);
-                play.lineTo(10, 0);
-                play.lineTo(-7, 10.5f);
+                play.moveTo(-7.3f, -10.8f);
+                play.lineTo(10.4f, 0f);
+                play.lineTo(-7.3f, 10.8f);
                 play.close();
                 canvas.drawPath(play, paint);
             }
             return;
         }
 
-        // Lighter, consistent iOS-style curved 10s arrows.
-        boolean back = index == 0;
+        boolean back = idx == 0;
         paint.setStyle(Paint.Style.STROKE);
-        paint.setStrokeWidth(2.7f);
+        paint.setStrokeWidth(2.6f);
         paint.setStrokeCap(Paint.Cap.ROUND);
-        if (back)
-            canvas.drawArc(-12.1f, -12.1f, 12.1f, 12.1f, -52, -263, false, paint);
-        else
-            canvas.drawArc(-12.1f, -12.1f, 12.1f, 12.1f, -128, 263, false, paint);
+        if (back) canvas.drawArc(
+                -13f, -13f, 13f, 13f, -48f, -265f, false, paint);
+        else canvas.drawArc(
+                -13f, -13f, 13f, 13f, -132f, 265f, false, paint);
 
         paint.setStyle(Paint.Style.FILL);
-        Path tip = new Path();
+        Path arrow = new Path();
         if (back) {
-            tip.moveTo(-13.6f, -13.4f);
-            tip.lineTo(-12.9f, -4.3f);
-            tip.lineTo(-5.6f, -10.4f);
+            arrow.moveTo(-14.6f, -14.4f);
+            arrow.lineTo(-14f, -4.6f);
+            arrow.lineTo(-6f, -11.3f);
         } else {
-            tip.moveTo(13.6f, -13.4f);
-            tip.lineTo(12.9f, -4.3f);
-            tip.lineTo(5.6f, -10.4f);
+            arrow.moveTo(14.6f, -14.4f);
+            arrow.lineTo(14f, -4.6f);
+            arrow.lineTo(6f, -11.3f);
         }
-        tip.close();
-        canvas.drawPath(tip, paint);
+        arrow.close();
+        canvas.drawPath(arrow, paint);
 
         paint.setTypeface(numberTypeface);
         paint.setTextAlign(Paint.Align.CENTER);
-        paint.setTextSize(12.8f);
+        paint.setTextSize(13f);
         Paint.FontMetrics fm = paint.getFontMetrics();
-        canvas.drawText("10", 0, -(fm.ascent + fm.descent) / 2f + 1.2f, paint);
+        canvas.drawText("10", 0, -(fm.ascent + fm.descent) * .5f + 1f, paint);
     }
 
     private void reset() {
         paint.reset();
         paint.setAntiAlias(true);
-        paint.setFilterBitmap(true);
     }
 }

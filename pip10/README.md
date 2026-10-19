@@ -1,34 +1,29 @@
-# PiP10 v0.6.0-alpha — Liquid Glass controls
+# PiP10 v0.7.0-alpha — iOS-style Frosted Media Card
 
-Compact, iOS-inspired **custom-painted glass controls** for Android PiP.
+Designed from the reference image: a **single dark smoky translucent rounded
+rectangle** with clean white controls, not separate shiny circles or a bright
+silver capsule.
 
-## v0.6 appearance changes
+## Differences vs v0.6
+- One softly tinted charcoal gray frosted glass panel.
+- Three large unframed white icons, evenly spaced across one shared surface.
+- No individual circular borders, metallic gradients, blue highlights, glare
+  or inset rings.
+- A thin low-opacity outline, soft shadow and subtle vertical tint.
+- Keep already working v0.5/v0.6 MediaBridge and ±10-second behavior.
+- Modern rounded rectangle instead of exaggerated pill radius.
 
-- Removed the giant full-width bottom overlay from v0.5.
-- Added a centered translucent capsule with rounded corners (up to 260dp).
-- Added multi-layer transparent glass highlights, lens rims, gradients and shadows.
-- Three smaller, precise glass lenses with back 10s / play-pause / forward 10s.
-- The touch area now covers only the compact capsule, not the whole PiP width.
-- MediaSession +/-10s and play/pause logic unchanged from the WORKING v0.5 build.
-- No LSPosed / SystemUI hooks, root or screen capture required.
+## Glass blur limitations
 
-**About actual blur:** Android Accessibility overlays cannot generally blur
-individual underlying app pixels through a Canvas paint operation without
-screen capture or privileged system APIs. This build uses a convincing
-translucent glass *simulation* rather than claiming true live backdrop blur.
+The floating Accessibility overlay draws a translucent panel. Real iOS
+background blur is not available via ordinary View Canvas. Android's
+`FLAG_BLUR_BEHIND` blurs the screen behind a window rather than being
+clipped to our desired rounded rectangle, so it is intentionally not enabled.
+No screen capture, privileged APIs or fake claims of native blur.
 
-## Updating from v0.5
+## Install
+Install over v0.6, keep Accessibility and Notification permissions enabled,
+disable any old LSPosed PiP10 module. The panel follows the PiP bounds.
 
-1. Install APK over v0.5 (same application ID, versionCode increased).
-2. Keep accessibility and Notification access enabled.
-3. Disable any older PiP10 LSPosed scope if it is still enabled.
-4. Open YouTube PiP; the new glass capsule should follow the window.
-
-## Notes
-
-The capsule is always visible while PiP is visible, so it may still overlap
-subtitles directly beneath it. PiP controls require a seek-capable MediaSession.
-This is a device-untested alpha even if Gradle compilation succeeds.
-For diagnostics use `adb logcat -d -s PiP10:I`.
-
-Only the independent pip10-build branch is changed.
+Source: independent `pip10-build` branch. Android 16 Pixel 8 Pro runtime
+behavior and aesthetics still require on-device confirmation.
