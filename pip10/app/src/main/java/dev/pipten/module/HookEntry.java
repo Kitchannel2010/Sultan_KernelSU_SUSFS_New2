@@ -6,7 +6,7 @@ import android.app.PictureInPictureParams;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Set;
-import de.robv.android.xposed.AndroidAppHelper;
+import android.app.AndroidAppHelper;
 import de.robv.android.xposed.IXposedHookLoadPackage;
 import de.robv.android.xposed.XC_MethodHook;
 import de.robv.android.xposed.XposedBridge;
