@@ -1,0 +1,7 @@
+<resources>
+ <string name="app_description">Ten-second rewind and forward actions for Android Picture-in-Picture.</string>
+ <string-array name="xposed_scope">
+  <item>com.google.android.youtube</item>
+  <item>app.revanced.android.youtube</item>
+ </string-array>
+</resources>

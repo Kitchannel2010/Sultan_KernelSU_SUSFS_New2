@@ -1,0 +1,25 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <application android:label="PiP 10s Controls" android:description="@string/app_description"
+      android:theme="@android:style/Theme.Material.Light.NoActionBar"
+      android:allowBackup="false" android:usesCleartextTraffic="false">
+    <meta-data android:name="xposedmodule" android:value="true"/>
+    <meta-data android:name="xposeddescription" android:value="Adds rewind and forward 10s controls to PiP"/>
+    <meta-data android:name="xposedminversion" android:value="82"/>
+    <meta-data android:name="xposedscope" android:resource="@array/xposed_scope"/>
+    <activity android:name=".MainActivity" android:exported="true">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity>
+    <receiver android:name=".MediaActionReceiver" android:exported="true"/>
+    <service android:name=".MediaNotificationListener"
+        android:label="PiP 10s Media Control"
+        android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
+        android:exported="true">
+      <intent-filter>
+        <action android:name="android.service.notification.NotificationListenerService"/>
+      </intent-filter>
+    </service>
+  </application>
+</manifest>
