@@ -1,17 +1,32 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
   <application android:label="PiP 10s Controls"
-      android:description="@string/app_description"
       android:theme="@android:style/Theme.Material.Light.NoActionBar"
-      android:allowBackup="false" android:usesCleartextTraffic="false">
-    <meta-data android:name="xposedmodule" android:value="true"/>
-    <meta-data android:name="xposeddescription" android:value="Adds rewind and forward 10s controls to PiP"/>
-    <meta-data android:name="xposedminversion" android:value="82"/>
-    <meta-data android:name="xposedscope" android:resource="@array/xposed_scope"/>
+      android:allowBackup="false"
+      android:usesCleartextTraffic="false">
     <activity android:name=".MainActivity" android:exported="true">
       <intent-filter>
         <action android:name="android.intent.action.MAIN"/>
         <category android:name="android.intent.category.LAUNCHER"/>
       </intent-filter>
     </activity>
+    <service android:name=".OverlayAccessibilityService"
+        android:label="PiP10 floating controls"
+        android:description="@string/accessibility_description"
+        android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+        android:exported="true">
+      <intent-filter>
+        <action android:name="android.accessibilityservice.AccessibilityService"/>
+      </intent-filter>
+      <meta-data android:name="android.accessibilityservice"
+          android:resource="@xml/accessibility_service_config"/>
+    </service>
+    <service android:name=".PiPMediaListener"
+        android:label="PiP10 media playback access"
+        android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
+        android:exported="true">
+      <intent-filter>
+        <action android:name="android.service.notification.NotificationListenerService"/>
+      </intent-filter>
+    </service>
   </application>
 </manifest>

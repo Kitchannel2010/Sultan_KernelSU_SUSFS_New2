@@ -1,8 +1,4 @@
 <resources>
- <string name="app_description">Ten-second rewind and forward actions for Android Picture-in-Picture.</string>
- <string-array name="xposed_scope">
-  <item>com.google.android.youtube</item>
-  <item>app.revanced.android.youtube</item>
-  <item>com.android.systemui</item>
- </string-array>
+    <string name="app_description">Custom floating PiP controls</string>
+    <string name="accessibility_description">Find Picture-in-Picture window bounds to position custom rewind, play/pause and forward buttons. Does not inspect or record screen text.</string>
 </resources>

@@ -1,37 +1,37 @@
-# PiP10 v0.4.0-alpha — custom-painted PiP controls
+# PiP10 — v0.5.0-alpha: fully standalone large PiP controls
 
-This version **renders the control appearance from scratch**, rather than
-asking Android's built-in ImageView to display oversized vector icons.
+This version replaces unsuccessful attempts at resizing hidden AOSP SystemUI
+PiP glyphs with a **genuine custom Android View** on top of the bottom of the
+PiP window. The 3 large dark circular buttons are Canvas rendered and are
+not limited by SystemUI's 20dp icons.
 
-- Left: translucent 48dp circle, counterclockwise 10-second arrow.
-- Middle: 48dp play/pause with the host playback state.
-- Right: clockwise 10-second arrow.
-- Uses the *existing* SystemUI action view & already-functional PendingIntents,
-  preserving native window management and touch input.
-- Does **not** replace the video content, which is rendered by Android PiP.
-- Without the SystemUI hook, normal native-sized controls remain available.
+**No LSPosed, Magisk, root, or modified YouTube is required.** Disable the old
+LSPosed module/scope after updating. The old Xposed entrypoint asset was removed.
 
-## Required LSPosed scope
-Tick BOTH:
-- `com.google.android.youtube` or `app.revanced.android.youtube`
-- `com.android.systemui`
-Then reboot. Install over v0.3.1 (same package name and debug signing for builds
-from same project; if signatures differ Android may require uninstall).
+## Setup
+1. Install APK.
+2. Open PiP 10s Controls app.
+3. Tap 'Enable accessibility overlay' and switch on PiP10 floating controls.
+4. Tap 'Enable notification access for media control' and switch on PiP10.
+5. Open YouTube (including Morphe) and enter normal video PiP.
+6. Custom buttons appear inside the bottom section of PiP and follow it.
 
-## How to check the hook
-```shell
-adb logcat -d | grep -i 'PiP10'
-```
-In LSPosed logs, look for:
-- `custom controls installed hooks=1` (or more): found SystemUI class
-- `custom 48dp PiP10 controls painted successfully`: actually displayed
-If `hooks=0`, the Pixel's ROM uses a different PiP menu implementation;
-do not assume the enlarged appearance works.
+Accessibility reads window bounds with `isInPictureInPictureMode()`; notification
+access uses `MediaSessionManager.getActiveSessions()` to control playback.
+They require explicit user consent. No notifications are logged or transmitted.
 
-## Safety
-This is a device-untested debug APK. Injecting SystemUI can affect its stability.
-If it crashes, disable SystemUI scope from LSPosed or boot into safe mode. It
-never flashes system partitions or touches the original kernel branches.
+## Limitations / troubleshooting
+- The controls currently stay visible whenever a PiP window is present.
+- They cover the lower ~56–74dp of the PiP and can overlap subtitles.
+- Original PiP menu may show behind the custom controls.
+- Works only where Android exposes PiP windows to Accessibility.
+- MediaSession needs to support `ACTION_SEEK_TO`; player buffering/decoder delays
+  are outside our control.
+- Android may restrict accessibility permission to sideloaded apps; you may need
+  App Info → three dots → Allow restricted settings before enabling it.
+- Debug using `adb logcat -d -s PiP10:I`.
+- If this build does not display overlays on Pixel Android 16, inspect PiP
+  accessibility window output and adapt to actual device implementation.
 
-PiP ±10-second seek still uses the v0.3.1 in-process MediaSession bridge.
-Look for `dispatchMs=` in logcat to understand command dispatch speed.
+To stop the overlay: disable PiP10 Accessibility service in Android Settings.
+No framework components or system partitions are changed.
