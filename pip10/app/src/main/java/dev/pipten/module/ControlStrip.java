@@ -90,8 +90,8 @@ public final class ControlStrip extends View {
 
         // Soft low-elevation shadow, not a glass-like white neon rim.
         reset();
-        paint.setColor(0x900E1A1C);
-        paint.setShadowLayer(dp(6), 0, dp(2), 0x32000000);
+        paint.setColor(0x080E1A1C);
+        paint.setShadowLayer(dp(6), 0, dp(2), 0x42000000);
         canvas.drawRoundRect(card, corner, corner, paint);
         paint.clearShadowLayer();
 

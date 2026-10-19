@@ -1,4 +1,4 @@
-# PiP10 v0.7.0-alpha — iOS-style Frosted Media Card
+# PiP10 v0.7.1-alpha — iOS-style Frosted Media Card
 
 Designed from the reference image: a **single dark smoky translucent rounded
 rectangle** with clean white controls, not separate shiny circles or a bright
@@ -27,3 +27,6 @@ disable any old LSPosed PiP10 module. The panel follows the PiP bounds.
 
 Source: independent `pip10-build` branch. Android 16 Pixel 8 Pro runtime
 behavior and aesthetics still require on-device confirmation.
+
+
+v0.7.1: lowered shadow base opacity so video texture remains subtly visible through the charcoal glass panel.
