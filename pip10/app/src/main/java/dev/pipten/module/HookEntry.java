@@ -3,10 +3,12 @@ package dev.pipten.module;
 import android.app.Activity;
 import android.app.Application;
 import android.app.PictureInPictureParams;
+import android.app.AndroidAppHelper;
+import android.media.session.MediaSession;
+import android.media.session.PlaybackState;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Set;
-import android.app.AndroidAppHelper;
 import de.robv.android.xposed.IXposedHookLoadPackage;
 import de.robv.android.xposed.XC_MethodHook;
 import de.robv.android.xposed.XposedBridge;
@@ -21,6 +23,32 @@ public final class HookEntry implements IXposedHookLoadPackage {
 
     @Override public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lp) {
         if (!ALLOWED.contains(lp.packageName)) return;
+        try {
+            XposedBridge.hookAllConstructors(MediaSession.class, new XC_MethodHook() {
+                @Override protected void afterHookedMethod(MethodHookParam p) {
+                    HostPlaybackBridge.track((MediaSession) p.thisObject);
+                }
+            });
+            XposedHelpers.findAndHookMethod(MediaSession.class, "setPlaybackState",
+                PlaybackState.class, new XC_MethodHook() {
+                    @Override protected void afterHookedMethod(MethodHookParam p) {
+                        HostPlaybackBridge.track((MediaSession) p.thisObject);
+                    }
+                });
+            XposedHelpers.findAndHookMethod(MediaSession.class, "setActive",
+                boolean.class, new XC_MethodHook() {
+                    @Override protected void afterHookedMethod(MethodHookParam p) {
+                        if ((boolean) p.args[0])
+                            HostPlaybackBridge.track((MediaSession) p.thisObject);
+                    }
+                });
+            XposedHelpers.findAndHookMethod(MediaSession.class, "release",
+                new XC_MethodHook() {
+                    @Override protected void beforeHookedMethod(MethodHookParam p) {
+                        HostPlaybackBridge.released((MediaSession) p.thisObject);
+                    }
+                });
+        } catch (Throwable t) { XposedBridge.log("PiP10 session hook: " + t); }
         try {
             XposedHelpers.findAndHookMethod(PictureInPictureParams.Builder.class, "build",
                 new XC_MethodHook() {
@@ -48,8 +76,9 @@ public final class HookEntry implements IXposedHookLoadPackage {
             XposedHelpers.findAndHookMethod(Activity.class, "enterPictureInPictureMode",
                 PictureInPictureParams.class, hook);
         } catch (Throwable t) { XposedBridge.log("PiP10 activity hooks: " + t); }
-        XposedBridge.log("PiP10 loaded: " + lp.packageName);
+        XposedBridge.log("PiP10 v0.2.0 loaded: " + lp.packageName);
     }
+
     private static void patchResult(XC_MethodHook.MethodHookParam p, Application app) {
         try {
             BUSY.set(true);

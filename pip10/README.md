@@ -1,11 +1,22 @@
-# PiP10 LSPosed Android 16 (experimental)
+# PiP10 LSPosed for Android 16 (experimental)
 
-Branch pip10-build is isolated from kernel development; only pip10/ and a dedicated .github workflow are added.
+v0.2.0: Try in-process playback control to fix v0.1.1's dead buttons.
+The scoped YouTube/Morphe application now receives its own PiP broadcast and
+uses its own MediaSession.getController() rather than requiring notification
+access to locate a session in a second application. Icon artwork is larger,
+but Android SystemUI still fixes button size / touch target.
 
-Build through GitHub Actions: Build PiP10 APK. Expected artifact app-debug.apk.
+**Scope: YouTube or app.revanced.android.youtube only. Do not scope SystemUI.**
+After upgrading, force-stop YouTube / Morphe, optionally reboot to ensure old
+LSPosed code is unloaded, then test a normal (non-live) video in PiP.
 
-Install APK, enable module LSPosed with YouTube scope, restart YouTube, grant Notification listener access from module app. PiP controls will offer -10 / play / +10 depending on app and SystemUI behavior.
+Failures can be diagnosed using logcat filter PiP10 (from the YouTube process).
+If "No active in-process MediaSession", the app may host its playback session
+in a separate process; a future revision must resolve its own cross-process
+session or use NotificationListener with explicit user permission.
 
-Known limitations: Not device-tested; actions may be overridden by video app or SystemUI; Requires MediaSession ACTION_SEEK_TO and active media notification. This prototype receiver is exported for host-app PendingIntents; don't use in sensitive environments. No changes to system partition.
+Security: listener is registered as RECEIVER_NOT_EXPORTED in the host app.
+The prior exported module receiver remains in the APK for backward
+compatibility but is no longer used by the new actions.
 
-Source lives in pip10/app. Debug-only build.
+Built as a debug-signed APK by .github/workflows/pip10-build.yml.
