@@ -22,6 +22,10 @@ public final class HookEntry implements IXposedHookLoadPackage {
         "com.google.android.youtube", "app.revanced.android.youtube"));
 
     @Override public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lp) {
+        if ("com.android.systemui".equals(lp.packageName)) {
+            SystemUiTweaks.install(lp.classLoader);
+            return;
+        }
         if (!ALLOWED.contains(lp.packageName)) return;
         try {
             XposedBridge.hookAllConstructors(MediaSession.class, new XC_MethodHook() {
@@ -33,6 +37,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 PlaybackState.class, new XC_MethodHook() {
                     @Override protected void afterHookedMethod(MethodHookParam p) {
                         HostPlaybackBridge.track((MediaSession) p.thisObject);
+                        PipActions.requestRefresh();
                     }
                 });
             XposedHelpers.findAndHookMethod(MediaSession.class, "setActive",
@@ -40,6 +45,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     @Override protected void afterHookedMethod(MethodHookParam p) {
                         if ((boolean) p.args[0])
                             HostPlaybackBridge.track((MediaSession) p.thisObject);
+                        PipActions.requestRefresh();
                     }
                 });
             XposedHelpers.findAndHookMethod(MediaSession.class, "release",
@@ -76,7 +82,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             XposedHelpers.findAndHookMethod(Activity.class, "enterPictureInPictureMode",
                 PictureInPictureParams.class, hook);
         } catch (Throwable t) { XposedBridge.log("PiP10 activity hooks: " + t); }
-        XposedBridge.log("PiP10 v0.2.0 loaded: " + lp.packageName);
+        XposedBridge.log("PiP10 v0.3.0 loaded: " + lp.packageName);
     }
 
     private static void patchResult(XC_MethodHook.MethodHookParam p, Application app) {

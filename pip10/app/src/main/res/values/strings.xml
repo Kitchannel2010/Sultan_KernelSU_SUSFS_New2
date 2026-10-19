@@ -3,5 +3,6 @@
  <string-array name="xposed_scope">
   <item>com.google.android.youtube</item>
   <item>app.revanced.android.youtube</item>
+  <item>com.android.systemui</item>
  </string-array>
 </resources>

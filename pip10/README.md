@@ -1,22 +1,17 @@
-# PiP10 LSPosed for Android 16 (experimental)
+# PiP10 LSPosed v0.3.0-alpha
 
-v0.2.0: Try in-process playback control to fix v0.1.1's dead buttons.
-The scoped YouTube/Morphe application now receives its own PiP broadcast and
-uses its own MediaSession.getController() rather than requiring notification
-access to locate a session in a second application. Icon artwork is larger,
-but Android SystemUI still fixes button size / touch target.
+**Corrected the three PiP controls:** -10s, Play/Pause (no borrowed headphones/media routing action), +10s.
+Refreshes icons after host MediaSession playback-state updates.
 
-**Scope: YouTube or app.revanced.android.youtube only. Do not scope SystemUI.**
-After upgrading, force-stop YouTube / Morphe, optionally reboot to ensure old
-LSPosed code is unloaded, then test a normal (non-live) video in PiP.
+**Optional SystemUI artwork enlargement:** enable `com.android.systemui` in LSPosed scope and reboot. The module attempts to find AOSP `PipMenuView.updateActionViews`, enlarging PiP10 artwork from the default 20dp to 32dp, while leaving hitboxes unchanged. Not enabled until explicitly selected. If a ROM does not contain the target class, nothing is enlarged. This is an experimental system process hook; if SystemUI becomes unstable, disable its LSPosed scope.
 
-Failures can be diagnosed using logcat filter PiP10 (from the YouTube process).
-If "No active in-process MediaSession", the app may host its playback session
-in a separate process; a future revision must resolve its own cross-process
-session or use NotificationListener with explicit user permission.
+No Notification Access permission is necessary (removed the v0.1 cross-app approach).
+Required app scope: `com.google.android.youtube` or `app.revanced.android.youtube`.
+Install APK over v0.2, force stop YouTube and reboot before testing.
 
-Security: listener is registered as RECEIVER_NOT_EXPORTED in the host app.
-The prior exported module receiver remains in the APK for backward
-compatibility but is no longer used by the new actions.
+To diagnose controls: `adb logcat -d -s PiP10:I`.
+- "In-process control receiver registered": buttons have a receiver.
+- "PiP action clicked": PendingIntent was delivered.
+- "No active in-process MediaSession": YouTube playback requires a different session control path.
 
-Built as a debug-signed APK by .github/workflows/pip10-build.yml.
+Only the independent pip10-build branch in the user's kernel repository is modified. This artifact is a debug-signed, device-untested alpha.
