@@ -13,10 +13,7 @@ import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityWindowInfo;
 import java.util.List;
 
-/**
- * A standalone control layer (TYPE_ACCESSIBILITY_OVERLAY) over the lower part
- * of the system PiP window. This does not modify SystemUI at all.
- */
+/** A small transparent accessibility overlay centered inside system PiP. */
 public final class OverlayAccessibilityService extends AccessibilityService {
     private static final String TAG = "PiP10";
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -24,7 +21,8 @@ public final class OverlayAccessibilityService extends AccessibilityService {
     private WindowManager.LayoutParams params;
     private ControlStrip controls;
     private boolean attached;
-    private Rect previous = new Rect();
+    private final Rect previous = new Rect();
+
     private final Runnable poll = new Runnable() {
         @Override public void run() {
             try { updateOverlay(); }
@@ -52,9 +50,9 @@ public final class OverlayAccessibilityService extends AccessibilityService {
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
                 PixelFormat.TRANSLUCENT);
         params.gravity = Gravity.TOP | Gravity.LEFT;
-        params.setTitle("PiP10 floating media controls");
+        params.setTitle("PiP10 Liquid Glass media controls");
         handler.post(poll);
-        Log.i(TAG, "Standalone overlay connected");
+        Log.i(TAG, "Liquid Glass overlay connected");
     }
 
     @Override public void onAccessibilityEvent(AccessibilityEvent e) {
@@ -72,14 +70,17 @@ public final class OverlayAccessibilityService extends AccessibilityService {
             removeOverlay();
             return;
         }
-        int height = Math.min(dp(74), Math.max(dp(56), pip.height() / 3));
-        int width = pip.width();
-        int x = pip.left;
-        int y = pip.bottom - height - dp(2);
+
+        // A transparent, narrow overlay: unlike v0.5 it NEVER intercepts the
+        // full width of the PiP, so taps and subtitles around it remain visible.
+        int width = Math.min(dp(260), pip.width() - dp(22));
+        int height = Math.min(dp(70), Math.max(dp(54), pip.height() / 3));
+        int x = pip.left + (pip.width() - width) / 2;
+        int y = pip.bottom - height - dp(5);
         controls.updatePlayState(MediaBridge.isPlaying(this));
+
         if (attached && previous.left == x && previous.top == y &&
-                previous.right == width && previous.bottom == height)
-            return;
+                previous.right == width && previous.bottom == height) return;
         params.x = x;
         params.y = y;
         params.width = width;
@@ -89,11 +90,11 @@ public final class OverlayAccessibilityService extends AccessibilityService {
             else {
                 manager.addView(controls, params);
                 attached = true;
-                Log.i(TAG, "Large overlay controls attached to PiP " + pip.toShortString());
+                Log.i(TAG, "Compact glass controls attached " + pip.toShortString());
             }
             previous.set(x, y, width, height);
         } catch (Throwable t) {
-            Log.e(TAG, "Overlay view update failed", t);
+            Log.e(TAG, "Glass overlay layout failed", t);
             removeOverlay();
         }
     }
@@ -104,16 +105,17 @@ public final class OverlayAccessibilityService extends AccessibilityService {
         Rect selected = null;
         for (AccessibilityWindowInfo window : windows) {
             if (window == null || !window.isInPictureInPictureMode()) continue;
-            Rect b = new Rect();
-            window.getBoundsInScreen(b);
-            if (b.isEmpty()) continue;
-            if (selected == null || b.width() > selected.width()) selected = b;
+            Rect bounds = new Rect();
+            window.getBoundsInScreen(bounds);
+            if (bounds.isEmpty()) continue;
+            if (selected == null || bounds.width() > selected.width())
+                selected = bounds;
         }
         return selected;
     }
 
-    private int dp(float dp) {
-        return Math.round(getResources().getDisplayMetrics().density * dp);
+    private int dp(float value) {
+        return Math.round(getResources().getDisplayMetrics().density * value);
     }
 
     private void removeOverlay() {

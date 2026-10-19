@@ -1,37 +1,34 @@
-# PiP10 — v0.5.0-alpha: fully standalone large PiP controls
+# PiP10 v0.6.0-alpha — Liquid Glass controls
 
-This version replaces unsuccessful attempts at resizing hidden AOSP SystemUI
-PiP glyphs with a **genuine custom Android View** on top of the bottom of the
-PiP window. The 3 large dark circular buttons are Canvas rendered and are
-not limited by SystemUI's 20dp icons.
+Compact, iOS-inspired **custom-painted glass controls** for Android PiP.
 
-**No LSPosed, Magisk, root, or modified YouTube is required.** Disable the old
-LSPosed module/scope after updating. The old Xposed entrypoint asset was removed.
+## v0.6 appearance changes
 
-## Setup
-1. Install APK.
-2. Open PiP 10s Controls app.
-3. Tap 'Enable accessibility overlay' and switch on PiP10 floating controls.
-4. Tap 'Enable notification access for media control' and switch on PiP10.
-5. Open YouTube (including Morphe) and enter normal video PiP.
-6. Custom buttons appear inside the bottom section of PiP and follow it.
+- Removed the giant full-width bottom overlay from v0.5.
+- Added a centered translucent capsule with rounded corners (up to 260dp).
+- Added multi-layer transparent glass highlights, lens rims, gradients and shadows.
+- Three smaller, precise glass lenses with back 10s / play-pause / forward 10s.
+- The touch area now covers only the compact capsule, not the whole PiP width.
+- MediaSession +/-10s and play/pause logic unchanged from the WORKING v0.5 build.
+- No LSPosed / SystemUI hooks, root or screen capture required.
 
-Accessibility reads window bounds with `isInPictureInPictureMode()`; notification
-access uses `MediaSessionManager.getActiveSessions()` to control playback.
-They require explicit user consent. No notifications are logged or transmitted.
+**About actual blur:** Android Accessibility overlays cannot generally blur
+individual underlying app pixels through a Canvas paint operation without
+screen capture or privileged system APIs. This build uses a convincing
+translucent glass *simulation* rather than claiming true live backdrop blur.
 
-## Limitations / troubleshooting
-- The controls currently stay visible whenever a PiP window is present.
-- They cover the lower ~56–74dp of the PiP and can overlap subtitles.
-- Original PiP menu may show behind the custom controls.
-- Works only where Android exposes PiP windows to Accessibility.
-- MediaSession needs to support `ACTION_SEEK_TO`; player buffering/decoder delays
-  are outside our control.
-- Android may restrict accessibility permission to sideloaded apps; you may need
-  App Info → three dots → Allow restricted settings before enabling it.
-- Debug using `adb logcat -d -s PiP10:I`.
-- If this build does not display overlays on Pixel Android 16, inspect PiP
-  accessibility window output and adapt to actual device implementation.
+## Updating from v0.5
 
-To stop the overlay: disable PiP10 Accessibility service in Android Settings.
-No framework components or system partitions are changed.
+1. Install APK over v0.5 (same application ID, versionCode increased).
+2. Keep accessibility and Notification access enabled.
+3. Disable any older PiP10 LSPosed scope if it is still enabled.
+4. Open YouTube PiP; the new glass capsule should follow the window.
+
+## Notes
+
+The capsule is always visible while PiP is visible, so it may still overlap
+subtitles directly beneath it. PiP controls require a seek-capable MediaSession.
+This is a device-untested alpha even if Gradle compilation succeeds.
+For diagnostics use `adb logcat -d -s PiP10:I`.
+
+Only the independent pip10-build branch is changed.

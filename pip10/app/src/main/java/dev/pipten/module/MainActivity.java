@@ -1,12 +1,10 @@
 package dev.pipten.module;
 
 import android.app.Activity;
-import android.app.NotificationManager;
 import android.content.ComponentName;
 import android.content.Intent;
 import android.os.Bundle;
 import android.provider.Settings;
-import android.text.TextUtils;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -22,22 +20,22 @@ public final class MainActivity extends Activity {
         content.setPadding(36, 36, 36, 36);
         TextView text = new TextView(this);
         text.setTextSize(18f);
-        text.setText("PiP10 v0.5.0 — Standalone iOS-style controls\n\n" +
-            "This build draws large floating 10-second controls from scratch. " +
-            "No LSPosed, root or SystemUI hook is needed.\n\n" +
-            "Enable BOTH permissions below, then start a normal YouTube video in PiP. " +
-            "The controls follow the video window.\n\n" +
-            "Privacy: the service reads PiP window bounds and active media playback " +
-            "state only. It does not save or upload notifications or screen contents.\n\n" +
-            "IMPORTANT: disable PiP10's old LSPosed scope before using this standalone version.");
+        text.setText("PiP10 v0.6.0 — Liquid Glass controls\n\n" +
+            "A compact translucent glass capsule with iOS-style 10-second " +
+            "rewind, play/pause and forward buttons. No LSPosed or root needed.\n\n" +
+            "Updating from v0.5? Your Accessibility and Notification permissions " +
+            "should still be enabled.\n\n" +
+            "The glass effect uses gradients and highlights; it does not " +
+            "record the display or blur protected video content.\n\n" +
+            "Disable any old PiP10 LSPosed scope to avoid duplicate controls.");
         content.addView(text);
         Button a = new Button(this);
-        a.setText("1. Enable accessibility overlay");
+        a.setText("Accessibility service settings");
         a.setOnClickListener(v -> startActivity(
                 new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)));
         content.addView(a);
         Button n = new Button(this);
-        n.setText("2. Enable notification access for media control");
+        n.setText("Notification access settings");
         n.setOnClickListener(v -> startActivity(
                 new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)));
         content.addView(n);
@@ -58,16 +56,16 @@ public final class MainActivity extends Activity {
 
     private void renderStatus() {
         if (status == null) return;
-        boolean a = false;
+        boolean accessible = false;
         try {
             String enabled = Settings.Secure.getString(
-                getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+                    getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
             String component = new ComponentName(
-                this, OverlayAccessibilityService.class).flattenToString();
-            a = enabled != null &&
-                enabled.toLowerCase().contains(component.toLowerCase());
+                    this, OverlayAccessibilityService.class).flattenToString();
+            accessible = enabled != null &&
+                    enabled.toLowerCase().contains(component.toLowerCase());
         } catch (Throwable ignored) {}
-        status.setText("\nAccessibility enabled: " + a +
+        status.setText("\nAccessibility enabled: " + accessible +
                 "\n" + MediaBridge.diagnostics(this) +
                 "\n\nDebug: adb logcat -d -s PiP10:I");
     }
