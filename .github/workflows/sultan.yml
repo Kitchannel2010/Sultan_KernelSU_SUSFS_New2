@@ -299,8 +299,17 @@ jobs:
             [[ -f "$CFG" ]] || CFG="out/.config"
             [[ -f "$CFG" ]] || { echo "Kernel .config was not generated" >&2; exit 1; }
             grep -Fxq "CONFIG_NOMOUNT=y" "$CFG" || { echo "CONFIG_NOMOUNT=y missing from $CFG" >&2; exit 1; }
+            # KernelSU-Next Kbuild checks $(objtree)/usr/include/linux/unistd.h.
+            # Without headers_install it disables preinit, even when CONFIG_KSU_SUSFS=y,
+            # causing undefined references to ksu_setup_preinit_file and
+            # ksu_preinit_handle_post_execveat during the final vmlinux link.
+            make CROSS_COMPILE=$GITHUB_WORKSPACE/gcc-14.2.0-nolibc/aarch64-linux/bin/aarch64-linux- CC=$GITHUB_WORKSPACE/gcc-14.2.0-nolibc/aarch64-linux/bin/aarch64-linux-gcc INSTALL_HDR_PATH="$PWD/out/usr" headers_install
+            test -s out/usr/include/linux/unistd.h || { echo "Kernel UAPI headers missing after headers_install" >&2; exit 1; }
           fi
           make CROSS_COMPILE=$GITHUB_WORKSPACE/gcc-14.2.0-nolibc/aarch64-linux/bin/aarch64-linux- CC=$GITHUB_WORKSPACE/gcc-14.2.0-nolibc/aarch64-linux/bin/aarch64-linux-gcc LOCALVERSION_AUTO=0 -j$(nproc --all)
+          if [[ "${{ inputs.codename }}" == "zuma" && "${{ matrix.features }}" == "ksun-susfs" ]]; then
+            test -s out/drivers/kernelsu/preinit/preinit.o || { echo "KernelSU preinit was not compiled" >&2; exit 1; }
+          fi
 
       - name: Copy Images
         run: |
