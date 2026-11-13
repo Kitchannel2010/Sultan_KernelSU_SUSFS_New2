@@ -1,9 +1,9 @@
-name: Experimental Sultan zuma KSU sucompat and SELinux status fixes
+name: Experimental Sultan zuma 6.1.134 KSU SUSFS with NoMount
 
 on:
   workflow_dispatch:
   push:
-    branches: [ksun-upgrade, ksun-sucompat-postboot-fix, ksun-selinux-hide-status-fix]
+    branches: [feature/nomount-on-working-6.1.134]
     paths: [.github/workflows/build-ksun-zuma-test.yml]
 
 permissions:
@@ -536,6 +536,19 @@ jobs:
           set -euo pipefail
           python3 "$GITHUB_WORKSPACE/scripts/instrument_ksu_root.py" "$CONFIG"
 
+      - name: Integrate pinned NoMount into bootable 6.1.134 Sultan kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$CONFIG"
+          NOMOUNT_COMMIT="6298d58af34a82cb094ec62f14646f63e6b12797"
+          curl -fsSL "https://raw.githubusercontent.com/maxsteeel/nomount/$NOMOUNT_COMMIT/kernel/setup.sh" -o /tmp/nomount-setup.sh
+          sh /tmp/nomount-setup.sh "$NOMOUNT_COMMIT"
+          test "$(git -C NoMount rev-parse HEAD)" = "$NOMOUNT_COMMIT"
+          test -L fs/nomount
+          grep -Fq 'obj-$(CONFIG_NOMOUNT) += nomount/' fs/Makefile
+          grep -Fq 'source "fs/nomount/Kconfig"' fs/Kconfig
+
       - name: Configure KernelSU
         run: |
           cd "$CONFIG"
@@ -543,6 +556,7 @@ jobs:
           echo "# KernelSU Configuration" >> ./arch/arm64/configs/zuma_defconfig
           echo "CONFIG_KSU=y" >> ./arch/arm64/configs/zuma_defconfig
           echo "CONFIG_KSU_SUSFS=y" >> ./arch/arm64/configs/zuma_defconfig
+          echo "CONFIG_NOMOUNT=y" >> ./arch/arm64/configs/zuma_defconfig
 
       - name: Configure Mountify Support
         run: |
@@ -613,7 +627,16 @@ jobs:
           make CROSS_COMPILE=$GITHUB_WORKSPACE/gcc-14.2.0-nolibc/aarch64-linux/bin/aarch64-linux- CC=$GITHUB_WORKSPACE/gcc-14.2.0-nolibc/aarch64-linux/bin/aarch64-linux-gcc -j$(nproc --all) zuma_defconfig
           grep '^CONFIG_KSU=y$' out/.config
           grep '^CONFIG_KSU_SUSFS=y$' out/.config
+          grep '^CONFIG_NOMOUNT=y$' out/.config
           make CROSS_COMPILE=$GITHUB_WORKSPACE/gcc-14.2.0-nolibc/aarch64-linux/bin/aarch64-linux- CC=$GITHUB_WORKSPACE/gcc-14.2.0-nolibc/aarch64-linux/bin/aarch64-linux-gcc -j$(nproc --all)
+
+      - name: Verify NoMount compiled into known-bootable Sultan 6.1.134
+        run: |
+          set -euo pipefail
+          test -s "$CONFIG/out/fs/nomount/nomount.o"
+          grep -Fqx 'CONFIG_NOMOUNT=y' "$CONFIG/out/.config"
+          test "$(sed -n 's/^SUBLEVEL = //p' "$CONFIG/Makefile" | head -1)" = "134"
+          test "$(find "$CONFIG/out/google-devices/zuma/dts" -maxdepth 1 -name '*.dtb' -type f | wc -l)" -ge 1
 
       - name: Copy Images
         run: |
@@ -637,7 +660,7 @@ jobs:
           cd ./AnyKernel3
 
           # Zip the files in the AnyKernel3 directory with a new naming convention
-          ZIP_NAME="zuma_A16_Sultan_KSUN_SuCompatPostBoot_TEST.zip"
+          ZIP_NAME="zuma_A16_Sultan_KSUN_SuCompatPostBoot_NoMount_6.1.134_TEST.zip"
           echo "Creating zip file $ZIP_NAME..."
           zip -r "../$ZIP_NAME" ./*
 
@@ -647,7 +670,7 @@ jobs:
           from pathlib import Path
           import hashlib, json, struct, zipfile
           root = Path('android_kernel_google_zuma')
-          zip_path = Path('zuma_A16_Sultan_KSUN_SuCompatPostBoot_TEST.zip')
+          zip_path = Path('zuma_A16_Sultan_KSUN_SuCompatPostBoot_NoMount_6.1.134_TEST.zip')
           def sha(data):
               return hashlib.sha256(data).hexdigest()
           image = (root/'out/arch/arm64/boot/Image').read_bytes()
@@ -678,7 +701,7 @@ jobs:
                            'block=vendor_kernel_boot;','is_slot_device=1;']:
                   assert line in script, line
           config = (root/'out/.config').read_text()
-          for flag in ['CONFIG_KSU=y','CONFIG_KSU_SUSFS=y']:
+          for flag in ['CONFIG_KSU=y','CONFIG_KSU_SUSFS=y','CONFIG_NOMOUNT=y']:
               assert flag in config.splitlines(), flag
           assert '#define SUSFS_VERSION "v2.0.0"' in (root/'include/linux/susfs.h').read_text()
           report = {'zip':str(zip_path),'sha256':sha(zip_path.read_bytes()),
@@ -693,11 +716,11 @@ jobs:
         if: success()
         run: |
           printf 'Sultan kernel: 8ef1cd1f141052a6bc0c1a93fb9cf5d013e227d2\nKSU Next: 956ea0f526fd4e216f8d67844cb61b34a4c49bfe\nKernel patches: a7b2ea40283a6810d7479a58230fd2c3994ebfd5\nSUSFS: %s\n' "$SUSFS_SHA" | tee build-source-versions.txt
-          sha256sum zuma_A16_Sultan_KSUN_SuCompatPostBoot_TEST.zip | tee build-sha256.txt
+          sha256sum zuma_A16_Sultan_KSUN_SuCompatPostBoot_NoMount_6.1.134_TEST.zip | tee build-sha256.txt
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: zuma-ksun-experimental-anykernel3
+          name: zuma-ksun-nomount-6.1.134-boot-test
           path: |
             *.zip
             build-source-versions.txt
