@@ -143,23 +143,23 @@ jobs:
               if "#include <linux/susfs_def.h>" not in rej or "CL_COPY_MNT_NS BIT(25)" not in rej:
                   raise SystemExit("Unknown namespace.c reject content; refusing automatic fix")
               src = ns.read_text()
-              anchor1 = "#include <linux/mnt_idmapping.h>\\n"
-              anchor2 = '#include "internal.h"\\n'
+              anchor1 = "#include <linux/mnt_idmapping.h>\n"
+              anchor2 = '#include "internal.h"\n'
               if src.count(anchor1) != 1 or src.count(anchor2) != 1:
                   raise SystemExit("namespace.c anchor changed; refusing automatic fix")
               if "#include <linux/susfs_def.h>" in src or "#define CL_COPY_MNT_NS BIT(25)" in src:
                   raise SystemExit("namespace.c already partially patched; manual review required")
               src = src.replace(anchor1, anchor1 + (
-                  "#ifdef CONFIG_KSU_SUSFS\\n"
-                  "#include <linux/susfs_def.h>\\n"
-                  "#endif\\n"
+                  "#ifdef CONFIG_KSU_SUSFS\n"
+                  "#include <linux/susfs_def.h>\n"
+                  "#endif\n"
               ), 1)
               src = src.replace(anchor2, anchor2 + (
-                  "\\n#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT\\n"
-                  "extern bool susfs_is_current_ksu_domain(void);\\n"
-                  "extern struct static_key_true susfs_is_sdcard_android_data_not_decrypted;\\n"
-                  "#define CL_COPY_MNT_NS BIT(25)\\n"
-                  "#endif\\n"
+                  "\n#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT\n"
+                  "extern bool susfs_is_current_ksu_domain(void);\n"
+                  "extern struct static_key_true susfs_is_sdcard_android_data_not_decrypted;\n"
+                  "#define CL_COPY_MNT_NS BIT(25)\n"
+                  "#endif\n"
               ), 1)
               ns.write_text(src)
 
