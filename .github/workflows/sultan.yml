@@ -68,7 +68,7 @@ jobs:
           # Clone repositories using the branch names
           git clone https://github.com/TheWildJames/AnyKernel3.git -b "$ANYKERNEL_BRANCH"
           git clone https://github.com/TheWildJames/kernel_patches.git
-          git clone https://github.com/TheWildJames/android_kernel_google_tensynos --depth=1
+          git clone https://github.com/kerneltoast/android_kernel_google_tensynos.git --branch 16.0.0-sultan --depth=1
           SUSFS_BRANCH="gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}"
           git clone https://gitlab.com/simonpunk/susfs4ksu.git -b "$SUSFS_BRANCH"
 
@@ -83,11 +83,18 @@ jobs:
 
       - name: Apply SUSFS Patches
         if: contains(matrix.features, 'susfs')
+        shell: bash
         run: |
-          # Apply pershoot susfs4ksu coexistence patches
+          set -euo pipefail
+          # Apply the exact upstream pershoot SUSFS coexistence commits.
+          # The former patch files are absent from current WildKernels/kernel_patches.
+          # Abort on any conflict; do not silently ignore this step.
           cd susfs4ksu
-          patch -p1 < "${{ github.workspace }}/kernel_patches/pershoot/susfs4ksu/0001-pershoot-Allow-core-to-be-built-with-no-features.patch"
-          patch -p1 < "${{ github.workspace }}/kernel_patches/pershoot/susfs4ksu/0002-pershoot-Implement-SuSFS-and-Toolkit-coexistence.patch"
+          git fetch https://gitlab.com/pershoot/susfs4ksu.git \
+            6387756d64b3ab9ececefc4523627a9ee05a7519 \
+            161c058fed5544a6573d87124f346dadd5c4962d
+          git -c user.name=GitHubActions -c user.email=actions@github.com cherry-pick 6387756d64b3ab9ececefc4523627a9ee05a7519
+          git -c user.name=GitHubActions -c user.email=actions@github.com cherry-pick 161c058fed5544a6573d87124f346dadd5c4962d
           cd ..
 
           echo "Changing to configuration directory: $CONFIG..."
@@ -103,12 +110,84 @@ jobs:
 
           perl -0pi -e 's/if \(IS_ERR\(f\) && !libperfmgr_redirect\(&f, dfd, tmp, &op, how\)\) \{/if (IS_ERR(f)) {/g' fs/open.c
 
-          # Apply SUSFS patch
-          patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}.patch || true
+          # Apply SUSFS patch, then check known Sultan context conflicts explicitly.
+          patch_rc=0
+          patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}.patch || patch_rc=$?
+          if (( patch_rc > 1 )); then
+            echo "SUSFS patch failed with fatal status $patch_rc" >&2
+            exit "$patch_rc"
+          fi
 
           perl -0pi -e 's/if \(IS_ERR\(f\)\) \{/if (IS_ERR(f) && !libperfmgr_redirect(&f, dfd, tmp, &op, how)) {/g' fs/open.c
-          
+
+          # Sultan newuname differs from GKI: preserve the existing target-specific fix.
           patch -p1 < ../kernel_patches/sultan/sys.c_fix.patch
+
+          # Check exact reject hunks, apply only the verified missing declarations,
+          # and fail on unexpected patch rejects.
+          SUSFS_PATCH_RC="$patch_rc" python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          rejected = {str(p) for p in Path(".").rglob("*.rej")}
+          expected = {"fs/namespace.c.rej", "kernel/sys.c.rej"}
+          unexpected = rejected - expected
+          if unexpected:
+              raise SystemExit(f"Unexpected SUSFS patch rejection(s): {sorted(unexpected)}")
+          if int(os.environ["SUSFS_PATCH_RC"]) and not rejected:
+              raise SystemExit("SUSFS patch returned failure without recognized rejects")
+
+          ns = Path("fs/namespace.c")
+          if "fs/namespace.c.rej" in rejected:
+              rej = Path("fs/namespace.c.rej").read_text()
+              if "#include <linux/susfs_def.h>" not in rej or "CL_COPY_MNT_NS BIT(25)" not in rej:
+                  raise SystemExit("Unknown namespace.c reject content; refusing automatic fix")
+              src = ns.read_text()
+              anchor1 = "#include <linux/mnt_idmapping.h>\n"
+              anchor2 = '#include "internal.h"\n'
+              if src.count(anchor1) != 1 or src.count(anchor2) != 1:
+                  raise SystemExit("namespace.c anchor changed; refusing automatic fix")
+              if "#include <linux/susfs_def.h>" in src or "#define CL_COPY_MNT_NS BIT(25)" in src:
+                  raise SystemExit("namespace.c already partially patched; manual review required")
+              src = src.replace(anchor1, anchor1 + (
+                  "#ifdef CONFIG_KSU_SUSFS\n"
+                  "#include <linux/susfs_def.h>\n"
+                  "#endif\n"
+              ), 1)
+              src = src.replace(anchor2, anchor2 + (
+                  "\n#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT\n"
+                  "extern bool susfs_is_current_ksu_domain(void);\n"
+                  "extern struct static_key_true susfs_is_sdcard_android_data_not_decrypted;\n"
+                  "#define CL_COPY_MNT_NS BIT(25)\n"
+                  "#endif\n"
+              ), 1)
+              ns.write_text(src)
+
+          if "kernel/sys.c.rej" in rejected:
+              rej = Path("kernel/sys.c.rej").read_text()
+              src = Path("kernel/sys.c").read_text()
+              if "susfs_spoof_uname(&tmp)" not in rej:
+                  raise SystemExit("Unknown sys.c reject content")
+              if src.count("susfs_spoof_uname(&tmp)") != 1 or src.count("susfs_is_uname_spoof_buffer_set;") != 1:
+                  raise SystemExit("Sultan sys.c uname fix missing or duplicated")
+
+          for p in rejected:
+              Path(p).unlink()
+          print("SUSFS patches verified; known Sultan namespace/newuname hunk conflicts reconciled")
+          PY
+
+      - name: Integrate pinned NoMount for zuma KernelSU/SUSFS
+        if: matrix.features == 'ksun-susfs' && inputs.codename == 'zuma'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$CONFIG"
+          NOMOUNT_COMMIT="6298d58af34a82cb094ec62f14646f63e6b12797"
+          curl -fsSL "https://raw.githubusercontent.com/maxsteeel/nomount/$NOMOUNT_COMMIT/kernel/setup.sh" -o /tmp/nomount-setup.sh
+          sh /tmp/nomount-setup.sh "$NOMOUNT_COMMIT"
+          test -L fs/nomount
+          grep -Fq 'obj-$(CONFIG_NOMOUNT) += nomount/' fs/Makefile
+          grep -Fq 'source "fs/nomount/Kconfig"' fs/Kconfig
 
       - name: Configure KernelSU
         if: contains(matrix.features, 'ksun')
@@ -124,6 +203,14 @@ jobs:
             echo "CONFIG_KSU_SUSFS=n" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
             patch -p1 < ../kernel_patches/wild/hooks/69_pure_manual_hooks_only.patch
           fi
+
+      - name: Enable built-in NoMount for zuma
+        if: matrix.features == 'ksun-susfs' && inputs.codename == 'zuma'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$CONFIG"
+          echo "CONFIG_NOMOUNT=y" >> "./arch/arm64/configs/${{ inputs.codename }}_defconfig"
 
       - name: Configure Mountify Support
         if: matrix.features == 'ksun-susfs'
@@ -207,7 +294,22 @@ jobs:
           cd "$CONFIG"
 
           make CROSS_COMPILE=$GITHUB_WORKSPACE/gcc-14.2.0-nolibc/aarch64-linux/bin/aarch64-linux- CC=$GITHUB_WORKSPACE/gcc-14.2.0-nolibc/aarch64-linux/bin/aarch64-linux-gcc -j$(nproc --all) ${{ inputs.codename }}_defconfig
+          if [[ "${{ inputs.codename }}" == "zuma" && "${{ matrix.features }}" == "ksun-susfs" ]]; then
+            CFG=".config"
+            [[ -f "$CFG" ]] || CFG="out/.config"
+            [[ -f "$CFG" ]] || { echo "Kernel .config was not generated" >&2; exit 1; }
+            grep -Fxq "CONFIG_NOMOUNT=y" "$CFG" || { echo "CONFIG_NOMOUNT=y missing from $CFG" >&2; exit 1; }
+            # KernelSU-Next Kbuild checks $(objtree)/usr/include/linux/unistd.h.
+            # Without headers_install it disables preinit, even when CONFIG_KSU_SUSFS=y,
+            # causing undefined references to ksu_setup_preinit_file and
+            # ksu_preinit_handle_post_execveat during the final vmlinux link.
+            make CROSS_COMPILE=$GITHUB_WORKSPACE/gcc-14.2.0-nolibc/aarch64-linux/bin/aarch64-linux- CC=$GITHUB_WORKSPACE/gcc-14.2.0-nolibc/aarch64-linux/bin/aarch64-linux-gcc INSTALL_HDR_PATH="$PWD/out/usr" headers_install
+            test -s out/usr/include/linux/unistd.h || { echo "Kernel UAPI headers missing after headers_install" >&2; exit 1; }
+          fi
           make CROSS_COMPILE=$GITHUB_WORKSPACE/gcc-14.2.0-nolibc/aarch64-linux/bin/aarch64-linux- CC=$GITHUB_WORKSPACE/gcc-14.2.0-nolibc/aarch64-linux/bin/aarch64-linux-gcc LOCALVERSION_AUTO=0 -j$(nproc --all)
+          if [[ "${{ inputs.codename }}" == "zuma" && "${{ matrix.features }}" == "ksun-susfs" ]]; then
+            test -s out/drivers/kernelsu/preinit/preinit.o || { echo "KernelSU preinit was not compiled" >&2; exit 1; }
+          fi
 
       - name: Copy Images
         run: |
@@ -232,6 +334,9 @@ jobs:
 
           # Zip the files in the AnyKernel3 directory with a new naming convention
           ZIP_NAME="${{ inputs.codename }}-a16-${{ matrix.features }}-anykernel3.zip"
+          if [[ "${{ inputs.codename }}" == "zuma" && "${{ matrix.features }}" == "ksun-susfs" ]]; then
+            ZIP_NAME="zuma-a16-ksun-susfs-nomount-anykernel3.zip"
+          fi
           echo "Creating zip file $ZIP_NAME..."
           zip -r "../$ZIP_NAME" ./*
 

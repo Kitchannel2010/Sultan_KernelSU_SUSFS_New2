@@ -1,0 +1,20 @@
+name: Verify zuma NoMount build
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/sultan.yml'
+      - '.github/workflows/verify-zuma-nomount.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  verify-zuma:
+    uses: ./.github/workflows/sultan.yml
+    with:
+      codename: "zuma"
+      android_version: "android14"
+      kernel_version: "6.1"
