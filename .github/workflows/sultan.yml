@@ -110,12 +110,71 @@ jobs:
 
           perl -0pi -e 's/if \(IS_ERR\(f\) && !libperfmgr_redirect\(&f, dfd, tmp, &op, how\)\) \{/if (IS_ERR(f)) {/g' fs/open.c
 
-          # Apply SUSFS patch
-          patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}.patch || true
+          # Apply SUSFS patch, then check known Sultan context conflicts explicitly.
+          patch_rc=0
+          patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}.patch || patch_rc=$?
+          if (( patch_rc > 1 )); then
+            echo "SUSFS patch failed with fatal status $patch_rc" >&2
+            exit "$patch_rc"
+          fi
 
           perl -0pi -e 's/if \(IS_ERR\(f\)\) \{/if (IS_ERR(f) && !libperfmgr_redirect(&f, dfd, tmp, &op, how)) {/g' fs/open.c
-          
+
+          # Sultan newuname differs from GKI: preserve the existing target-specific fix.
           patch -p1 < ../kernel_patches/sultan/sys.c_fix.patch
+
+          # Check exact reject hunks, apply only the verified missing declarations,
+          # and fail on unexpected patch rejects.
+          SUSFS_PATCH_RC="$patch_rc" python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          rejected = {str(p) for p in Path(".").rglob("*.rej")}
+          expected = {"fs/namespace.c.rej", "kernel/sys.c.rej"}
+          unexpected = rejected - expected
+          if unexpected:
+              raise SystemExit(f"Unexpected SUSFS patch rejection(s): {sorted(unexpected)}")
+          if int(os.environ["SUSFS_PATCH_RC"]) and not rejected:
+              raise SystemExit("SUSFS patch returned failure without recognized rejects")
+
+          ns = Path("fs/namespace.c")
+          if "fs/namespace.c.rej" in rejected:
+              rej = Path("fs/namespace.c.rej").read_text()
+              if "#include <linux/susfs_def.h>" not in rej or "CL_COPY_MNT_NS BIT(25)" not in rej:
+                  raise SystemExit("Unknown namespace.c reject content; refusing automatic fix")
+              src = ns.read_text()
+              anchor1 = "#include <linux/mnt_idmapping.h>\\n"
+              anchor2 = '#include "internal.h"\\n'
+              if src.count(anchor1) != 1 or src.count(anchor2) != 1:
+                  raise SystemExit("namespace.c anchor changed; refusing automatic fix")
+              if "#include <linux/susfs_def.h>" in src or "#define CL_COPY_MNT_NS BIT(25)" in src:
+                  raise SystemExit("namespace.c already partially patched; manual review required")
+              src = src.replace(anchor1, anchor1 + (
+                  "#ifdef CONFIG_KSU_SUSFS\\n"
+                  "#include <linux/susfs_def.h>\\n"
+                  "#endif\\n"
+              ), 1)
+              src = src.replace(anchor2, anchor2 + (
+                  "\\n#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT\\n"
+                  "extern bool susfs_is_current_ksu_domain(void);\\n"
+                  "extern struct static_key_true susfs_is_sdcard_android_data_not_decrypted;\\n"
+                  "#define CL_COPY_MNT_NS BIT(25)\\n"
+                  "#endif\\n"
+              ), 1)
+              ns.write_text(src)
+
+          if "kernel/sys.c.rej" in rejected:
+              rej = Path("kernel/sys.c.rej").read_text()
+              src = Path("kernel/sys.c").read_text()
+              if "susfs_spoof_uname(&tmp)" not in rej:
+                  raise SystemExit("Unknown sys.c reject content")
+              if src.count("susfs_spoof_uname(&tmp)") != 1 or src.count("susfs_is_uname_spoof_buffer_set;") != 1:
+                  raise SystemExit("Sultan sys.c uname fix missing or duplicated")
+
+          for p in rejected:
+              Path(p).unlink()
+          print("SUSFS patches verified; known Sultan namespace/newuname hunk conflicts reconciled")
+          PY
 
       - name: Integrate pinned NoMount for zuma KernelSU/SUSFS
         if: matrix.features == 'ksun-susfs' && inputs.codename == 'zuma'
