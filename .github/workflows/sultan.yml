@@ -110,6 +110,19 @@ jobs:
           
           patch -p1 < ../kernel_patches/sultan/sys.c_fix.patch
 
+      - name: Integrate pinned NoMount for zuma KernelSU/SUSFS
+        if: matrix.features == 'ksun-susfs' && inputs.codename == 'zuma'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$CONFIG"
+          NOMOUNT_COMMIT="6298d58af34a82cb094ec62f14646f63e6b12797"
+          curl -fsSL "https://raw.githubusercontent.com/maxsteeel/nomount/$NOMOUNT_COMMIT/kernel/setup.sh" -o /tmp/nomount-setup.sh
+          sh /tmp/nomount-setup.sh "$NOMOUNT_COMMIT"
+          test -L fs/nomount
+          grep -Fq 'obj-$(CONFIG_NOMOUNT) += nomount/' fs/Makefile
+          grep -Fq 'source "fs/nomount/Kconfig"' fs/Kconfig
+
       - name: Configure KernelSU
         if: contains(matrix.features, 'ksun')
         run: |
@@ -124,6 +137,14 @@ jobs:
             echo "CONFIG_KSU_SUSFS=n" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
             patch -p1 < ../kernel_patches/wild/hooks/69_pure_manual_hooks_only.patch
           fi
+
+      - name: Enable built-in NoMount for zuma
+        if: matrix.features == 'ksun-susfs' && inputs.codename == 'zuma'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$CONFIG"
+          echo "CONFIG_NOMOUNT=y" >> "./arch/arm64/configs/${{ inputs.codename }}_defconfig"
 
       - name: Configure Mountify Support
         if: matrix.features == 'ksun-susfs'
@@ -207,6 +228,12 @@ jobs:
           cd "$CONFIG"
 
           make CROSS_COMPILE=$GITHUB_WORKSPACE/gcc-14.2.0-nolibc/aarch64-linux/bin/aarch64-linux- CC=$GITHUB_WORKSPACE/gcc-14.2.0-nolibc/aarch64-linux/bin/aarch64-linux-gcc -j$(nproc --all) ${{ inputs.codename }}_defconfig
+          if [[ "${{ inputs.codename }}" == "zuma" && "${{ matrix.features }}" == "ksun-susfs" ]]; then
+            CFG=".config"
+            [[ -f "$CFG" ]] || CFG="out/.config"
+            [[ -f "$CFG" ]] || { echo "Kernel .config was not generated" >&2; exit 1; }
+            grep -Fxq "CONFIG_NOMOUNT=y" "$CFG" || { echo "CONFIG_NOMOUNT=y missing from $CFG" >&2; exit 1; }
+          fi
           make CROSS_COMPILE=$GITHUB_WORKSPACE/gcc-14.2.0-nolibc/aarch64-linux/bin/aarch64-linux- CC=$GITHUB_WORKSPACE/gcc-14.2.0-nolibc/aarch64-linux/bin/aarch64-linux-gcc LOCALVERSION_AUTO=0 -j$(nproc --all)
 
       - name: Copy Images
@@ -232,6 +259,9 @@ jobs:
 
           # Zip the files in the AnyKernel3 directory with a new naming convention
           ZIP_NAME="${{ inputs.codename }}-a16-${{ matrix.features }}-anykernel3.zip"
+          if [[ "${{ inputs.codename }}" == "zuma" && "${{ matrix.features }}" == "ksun-susfs" ]]; then
+            ZIP_NAME="zuma-a16-ksun-susfs-nomount-anykernel3.zip"
+          fi
           echo "Creating zip file $ZIP_NAME..."
           zip -r "../$ZIP_NAME" ./*
 
